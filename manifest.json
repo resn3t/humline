@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "id": "nowpip",
+  "name": "nowpip",
+  "version": "1.0.0",
+  "author": "resn3t",
+  "description": "Compact now-playing bar widget with a live dot spectrum, seek bar, volume and jump-to-player",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "nowpip",
+    "description": "Now playing with live spectrum, seek, volume and jump-to-player",
+    "category": "Media",
+    "defaultSection": "center",
+    "allowMultiple": false
+  }
+}

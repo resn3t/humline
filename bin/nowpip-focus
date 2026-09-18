@@ -1,0 +1,83 @@
+#!/bin/bash
+# Focus the window (and herdr tab) that hosts an MPRIS player.
+# Usage: nowpip-focus <mpris-dbus-name> [track-title]
+# Optional herdr support: jumps to the herdr tab that runs the player.
+
+set -u
+bus=${1:?usage: nowpip-focus <mpris-dbus-name> [track-title]}
+title=${2:-}
+
+pid=$(busctl --user call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus \
+  GetConnectionUnixProcessID s "$bus" 2>/dev/null | awk '{print $2}')
+[[ -n $pid ]] || exit 1
+
+chain=()
+p=$pid
+while [[ -n $p && $p -gt 1 ]]; do
+  chain+=("$p")
+  p=$(ps -o ppid= -p "$p" 2>/dev/null | tr -d ' ')
+done
+
+focus_window() {
+  local pos x y
+  pos=$(hyprctl cursorpos 2>/dev/null)
+  hyprctl dispatch "hl.dsp.focus({ window = \"address:$1\" })" >/dev/null 2>&1 ||
+    hyprctl dispatch focuswindow "address:$1" >/dev/null 2>&1
+  # Focusing warps the cursor to the window; put it back where the user left it.
+  if [[ $pos =~ ^(-?[0-9]+),\ (-?[0-9]+)$ ]]; then
+    x=${BASH_REMATCH[1]} y=${BASH_REMATCH[2]}
+    sleep 0.05
+    hyprctl dispatch "hl.dsp.cursor.move({ x = $x, y = $y })" >/dev/null 2>&1
+  fi
+}
+
+in_chain() {
+  local x
+  for x in "${chain[@]}"; do [[ $x == "$1" ]] && return 0; done
+  return 1
+}
+
+clients=$(hyprctl -j clients)
+
+# herdr: the player's process tree hangs off the herdr server, not the window.
+for p in "${chain[@]}"; do
+  if [[ $(ps -o args= -p "$p" 2>/dev/null) == *"herdr server"* ]] && command -v herdr >/dev/null; then
+    panes=$(herdr pane list 2>/dev/null | jq -c '.result.panes[]')
+    while read -r pane; do
+      id=$(jq -r .pane_id <<<"$pane")
+      info=$(herdr pane process-info --pane "$id" 2>/dev/null)
+      for cand in $(jq -r '.result.process_info | [.shell_pid, .foreground_process_group_id, (.foreground_processes[]?.pid)] | .[] | select(. != null)' <<<"$info"); do
+        if in_chain "$cand"; then
+          herdr workspace focus "$(jq -r .workspace_id <<<"$pane")" >/dev/null 2>&1
+          herdr tab focus "$(jq -r .tab_id <<<"$pane")" >/dev/null 2>&1
+          for client in $(pgrep -x herdr); do
+            [[ $(ps -o args= -p "$client") == *"herdr server"* ]] && continue
+            q=$client
+            while [[ -n $q && $q -gt 1 ]]; do
+              addr=$(jq -r --argjson q "$q" '[.[] | select(.pid == $q)][0].address // empty' <<<"$clients")
+              if [[ -n $addr ]]; then focus_window "$addr"; exit 0; fi
+              q=$(ps -o ppid= -p "$q" | tr -d ' ')
+            done
+          done
+          exit 0
+        fi
+      done
+    done <<<"$panes"
+    break
+  fi
+done
+
+# Browsers switch to the playing tab on Raise; harmless for other players.
+if [[ $(busctl --user get-property "$bus" /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2 CanRaise 2>/dev/null) == "b true" ]]; then
+  busctl --user call "$bus" /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2 Raise >/dev/null 2>&1
+fi
+
+for p in "${chain[@]}"; do
+  addr=$(jq -r --argjson p "$p" --arg t "$title" '
+    [.[] | select(.pid == $p)] as $w
+    | (if $t != "" then [$w[] | select(.title | contains($t))][0] else null end) // $w[0]
+    | .address // empty' <<<"$clients")
+  if [[ -n $addr ]]; then focus_window "$addr"; exit 0; fi
+done
+
+exit 1
