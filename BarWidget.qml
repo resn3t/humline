@@ -193,7 +193,17 @@ BarWidget {
 
   Process { id: focusProc }
   // Fire-and-forget cliamp action from IPC while the card is closed.
-  Process { id: cliampIpcProc }
+  Process {
+    id: cliampIpcProc
+    stdout: StdioCollector {
+      onStreamFinished: {
+        var r = root.parseReply(text)
+        notifyProc.command = ["notify-send", "-a", "Humline", "-t", "2000", r.ok ? (r.fav ? "Added to favorites" : "Removed from favorites") : "Could not change favorites"]
+        notifyProc.running = true
+      }
+    }
+  }
+  Process { id: notifyProc }
 
   // The cliamp files are only compiled and instantiated on demand;
   // clearing `source` destroys them again.
@@ -387,7 +397,7 @@ BarWidget {
             Text {
               textFormat: Text.PlainText
               text: root.artist
-              color: Qt.darker(root.bar.foreground, 1.3)
+              color: Color.muted
               font.family: root.bar.fontFamily
               font.pixelSize: Style.font.bodySmall
               elide: Text.ElideRight
@@ -398,7 +408,7 @@ BarWidget {
             Text {
               textFormat: Text.PlainText
               text: root.activePlayer && root.activePlayer.trackAlbum ? root.activePlayer.trackAlbum : ""
-              color: Qt.darker(root.bar.foreground, 1.6)
+              color: Color.muted
               font.family: root.bar.fontFamily
               font.pixelSize: Style.font.caption
               elide: Text.ElideRight
@@ -445,7 +455,7 @@ BarWidget {
             textFormat: Text.PlainText
             anchors.verticalCenter: parent.verticalCenter
             text: root.formatTime(progressSlider.dragging ? progressSlider.liveValue : progressRow.position)
-            color: Qt.darker(root.bar.foreground, 1.3)
+            color: Color.muted
             font.family: root.bar.fontFamily
             font.pixelSize: Style.font.caption
             width: Style.space(40)
@@ -469,7 +479,7 @@ BarWidget {
             textFormat: Text.PlainText
             anchors.verticalCenter: parent.verticalCenter
             text: root.formatTime(progressRow.length)
-            color: Qt.darker(root.bar.foreground, 1.3)
+            color: Color.muted
             font.family: root.bar.fontFamily
             font.pixelSize: Style.font.caption
             width: Style.space(40)
@@ -583,7 +593,7 @@ BarWidget {
           horizontalAlignment: Text.AlignHCenter
           textFormat: Text.PlainText
           text: root.cliamp ? root.cliamp.message : ""
-          color: Qt.darker(root.bar.foreground, 1.4)
+          color: Color.muted
           font.family: root.bar.fontFamily
           font.pixelSize: Style.font.caption
           elide: Text.ElideRight
@@ -625,7 +635,7 @@ BarWidget {
             textFormat: Text.PlainText
             anchors.verticalCenter: parent.verticalCenter
             text: Math.round(volumeRow.volume * 100) + "%"
-            color: Qt.darker(root.bar.foreground, 1.3)
+            color: Color.muted
             font.family: root.bar.fontFamily
             font.pixelSize: Style.font.caption
             width: Style.space(34)
@@ -709,7 +719,7 @@ BarWidget {
                   Text {
                     textFormat: Text.PlainText
                     text: sourceRow.sourceDetail
-                    color: Qt.darker(root.bar.foreground, 1.5)
+                    color: Color.muted
                     font.family: root.bar.fontFamily
                     font.pixelSize: Style.font.caption
                     elide: Text.ElideRight

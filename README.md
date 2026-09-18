@@ -64,7 +64,7 @@ o.bind("SUPER + M", "Now playing", "omarchy-shell -q humline togglePopup")
 
 | Action | Result |
 | --- | --- |
-| Left-click | open/close the card (Esc closes it) |
+| Left-click | open/close the card (click outside to dismiss) |
 | Right-click | jump to the player |
 | Middle-click | play/pause |
 | Scroll | previous/next track |
