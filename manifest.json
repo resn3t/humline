@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
-  "id": "nowpip",
-  "name": "nowpip",
+  "id": "humline",
+  "name": "Humline",
   "version": "1.1.0",
   "author": "resn3t",
-  "description": "Compact now-playing bar widget with a live dot spectrum, seek bar, volume, jump-to-player and cliamp extras",
+  "description": "Compact now-playing bar widget with a live dot spectrum, seek bar, volume and jump-to-player; extra controls for cliamp",
   "kinds": [
     "bar-widget"
   ],
@@ -12,7 +12,7 @@
     "barWidget": "BarWidget.qml"
   },
   "barWidget": {
-    "displayName": "nowpip",
+    "displayName": "Humline",
     "description": "Now playing with live spectrum, seek, volume and jump-to-player",
     "category": "Media",
     "defaultSection": "center",

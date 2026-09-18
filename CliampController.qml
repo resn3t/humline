@@ -1,23 +1,26 @@
-// cliamp state + actions; loaded only while the card is open on cliamp.
+// cliamp state + actions. Loaded only while the card is open on cliamp (and
+// kept alive until a running action finishes).
 import QtQuick
 import Quickshell
 import Quickshell.Io
-import qs.Ui
-import qs.Commons
 
 Item {
   id: ctl
 
-  // The nowpip BarWidget, passed in by the Loader before bindings run.
+  // The Humline BarWidget, passed in by the Loader before bindings run.
   required property var widget
 
   property bool shuffle: false
   property string repeat: "Off"
   property bool fav: false
+  // cliamp's own track path (MPRIS only has a URL-encoded xesam:url).
   property string path: ""
   property string message: ""
-  property bool stateAgain: false
   readonly property bool busy: actionProc.running
+  // Bumped by every action so an older state reply can't undo its result.
+  property int generation: 0
+  property int stateGeneration: 0
+  property bool stateAgain: false
 
   function flash(text) {
     message = text
@@ -32,9 +35,18 @@ Item {
     if (r.path !== undefined) path = r.path
   }
 
+  function helper(args) {
+    return ["python3", ctl.widget.cliampHelper].concat(args)
+  }
+
   function refresh() {
-    if (stateProc.running) stateAgain = true
-    else stateProc.running = true
+    if (stateProc.running) {
+      stateAgain = true
+      return
+    }
+    stateGeneration = generation
+    stateProc.command = helper(["state"])
+    stateProc.running = true
   }
 
   // One action at a time; `done(reply)` runs after the helper exits.
@@ -43,11 +55,15 @@ Item {
       flash("cliamp is busy…")
       return false
     }
+    generation++
     actionProc.done = done || null
-    actionProc.command = ["bash", widget.cliampHelper].concat(args)
+    actionProc.command = helper(args)
     actionProc.running = true
     return true
   }
+
+  // A closing page drops its pending callback; the action still completes.
+  function detach() { actionProc.done = null }
 
   function toggleFavorite() {
     run(["fav", path], function(r) {
@@ -59,7 +75,7 @@ Item {
   Component.onCompleted: refresh()
 
   Connections {
-    target: widget
+    target: ctl.widget
     function onTitleChanged() { refreshTimer.restart() }
     function onTrackUrlChanged() { refreshTimer.restart() }
   }
@@ -69,9 +85,11 @@ Item {
 
   Process {
     id: stateProc
-    command: ["bash", widget.cliampHelper, "state"]
     stdout: StdioCollector {
-      onStreamFinished: ctl.apply(widget.parseReply(text))
+      onStreamFinished: {
+        if (ctl.stateGeneration === ctl.generation && !actionProc.running)
+          ctl.apply(ctl.widget.parseReply(text))
+      }
     }
     onExited: if (ctl.stateAgain) {
       ctl.stateAgain = false
@@ -84,7 +102,7 @@ Item {
     property var done: null
     stdout: StdioCollector {
       onStreamFinished: {
-        var r = widget.parseReply(text)
+        var r = ctl.widget.parseReply(text)
         if (r.ok) ctl.apply(r)
         else ctl.flash(r.error || "cliamp error")
         var cb = actionProc.done

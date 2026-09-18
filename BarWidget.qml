@@ -7,7 +7,7 @@ import qs.Commons
 
 BarWidget {
   id: root
-  moduleName: "nowpip"
+  moduleName: "humline"
 
   // Players with something to show; playerctld only mirrors other players.
   readonly property var sourcePlayers: {
@@ -71,7 +71,7 @@ BarWidget {
   readonly property var cliamp: cliampLoader.item
   // cliamp's own track path; MPRIS xesam:url until the first state reply.
   readonly property string cliampPath: cliamp && cliamp.path ? cliamp.path : trackUrl
-  readonly property string cliampHelper: localPath("bin/nowpip-cliamp")
+  readonly property string cliampHelper: localPath("bin/humline-cliamp")
 
   onIsCliampChanged: if (!isCliamp) view = "main"
 
@@ -156,7 +156,7 @@ BarWidget {
   function focusPlayer(player) {
     if (!player || !player.dbusName) return
     popupOpen = false
-    focusProc.command = ["bash", localPath("bin/nowpip-focus"), String(player.dbusName), String(player.trackTitle || "")]
+    focusProc.command = ["bash", localPath("bin/humline-focus"), String(player.dbusName), String(player.trackTitle || "")]
     focusProc.running = true
   }
 
@@ -204,12 +204,14 @@ BarWidget {
 
   Loader {
     id: cliampLoader
-    readonly property bool wanted: root.cliampOpen
+    // Stays loaded until a running action finishes, so closing the card
+    // never drops a like/add/load halfway.
+    readonly property bool wanted: root.cliampOpen || (!!item && item.busy)
     onWantedChanged: root.loadOnDemand(cliampLoader, wanted, "CliampController.qml")
   }
 
   IpcHandler {
-    target: "nowpip"
+    target: "humline"
 
     function togglePopup(): void { root.popupOpen = root.hasMedia && !root.popupOpen }
     function focusPlayer(): void { root.focusPlayer(root.activePlayer) }
@@ -218,7 +220,7 @@ BarWidget {
       if (!root.isCliamp) return
       if (root.cliamp) root.cliamp.toggleFavorite()
       else if (!cliampIpcProc.running) {
-        cliampIpcProc.command = ["bash", root.cliampHelper, "fav", ""]
+        cliampIpcProc.command = ["python3", root.cliampHelper, "fav", ""]
         cliampIpcProc.running = true
       }
     }
@@ -230,6 +232,8 @@ BarWidget {
       root.openView("browse")
     }
     function addToPlaylist(): void { root.openView("lists") }
+    // Change the active player's volume by `delta` (0..1 scale, e.g. 0.05).
+    function volume(delta: real): void { if (root.canSetVolume) root.setVolume(root.activePlayer.volume + delta) }
     function seek(offsetSeconds: real): void {
       if (!root.activePlayer) return
       root.activePlayer.positionChanged()
@@ -326,6 +330,8 @@ BarWidget {
         width: parent.width
         visible: pageLoader.item === null
         spacing: Style.space(10)
+        focus: visible
+        Keys.onEscapePressed: root.popupOpen = false
 
         Row {
           spacing: Style.space(10)
@@ -544,7 +550,8 @@ BarWidget {
             foreground: root.cliamp && root.cliamp.fav ? Color.accent : root.bar.foreground
             horizontalPadding: Style.spacing.controlPaddingX
             verticalPadding: Style.spacing.controlPaddingY
-            enabled: !!root.cliamp && root.cliamp.path !== ""
+            enabled: !!root.cliamp && root.cliamp.path !== "" && !root.cliamp.busy
+            opacity: enabled ? 1.0 : 0.4
             tooltipText: root.cliamp && root.cliamp.fav ? "Remove from cliamp favorites" : "Add to cliamp favorites"
             onClicked: root.cliamp.toggleFavorite()
           }
@@ -555,6 +562,7 @@ BarWidget {
             horizontalPadding: Style.spacing.controlPaddingX
             verticalPadding: Style.spacing.controlPaddingY
             enabled: !!root.cliamp && root.cliamp.path !== ""
+            opacity: enabled ? 1.0 : 0.4
             tooltipText: "Add to playlist"
             onClicked: root.view = "lists"
           }

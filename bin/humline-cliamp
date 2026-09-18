@@ -1,0 +1,345 @@
+#!/usr/bin/env python3
+"""Humline <-> cliamp bridge.
+
+One short-lived call per user action. Always prints exactly one line of
+compact JSON; failures are {"ok": false, "error": "..."} so the bar never
+parses cliamp's own (sometimes multi-MB) output.
+
+  state                        path, shuffle, repeat, favorite flag
+  fav [path]                   toggle the current track in cliamp favorites
+  shuffle | repeat             toggle shuffle / cycle repeat
+  providers                    configured providers
+  playlists <prov> <off> <n>   one page of a provider's playlists/stations
+  load <prov> <id>             queue a playlist/station load (returns at once)
+  targets <path>               local playlists (+ whether the track is in them)
+  sptargets                    your own Spotify playlists (add-only)
+  add <prov> <id> <path>       add the current track to a playlist
+  remove <id> <path>           remove a track from a local playlist
+"""
+
+import fcntl
+import json
+import os
+import subprocess
+import sys
+import tempfile
+import time
+import unicodedata
+
+VIRTUAL_LISTS = {"Favorites", "Recently Played"}
+
+
+class Fail(Exception):
+    pass
+
+
+def out(obj):
+    sys.stdout.write(json.dumps(obj, separators=(",", ":"), ensure_ascii=False) + "\n")
+
+
+def config_dir():
+    # Same lookup order as cliamp's internal/appdir.
+    if os.environ.get("CLIAMP_CONFIG_DIR"):
+        return os.environ["CLIAMP_CONFIG_DIR"]
+    if os.environ.get("XDG_CONFIG_HOME"):
+        return os.path.join(os.environ["XDG_CONFIG_HOME"], "cliamp")
+    return os.path.join(os.path.expanduser("~"), ".config", "cliamp")
+
+
+def cliamp(args, timeout):
+    try:
+        p = subprocess.run(["cliamp", *args], capture_output=True, text=True, timeout=timeout)
+    except FileNotFoundError:
+        raise Fail("cliamp is not installed")
+    except subprocess.TimeoutExpired:
+        raise Fail("cliamp did not answer in time")
+    if p.returncode != 0:
+        msg = (p.stderr or p.stdout).strip().splitlines()
+        raise Fail(msg[-1][:160] if msg else "cliamp error")
+    try:
+        return json.loads(p.stdout)
+    except ValueError:
+        raise Fail("unexpected reply from cliamp")
+
+
+def call(op, params=None, timeout=20):
+    reply = cliamp(["remote", "call", op, "--params", json.dumps(params or {}), "--wait"], timeout)
+    job = reply.get("job") or {}
+    if job.get("state") != "succeeded":
+        err = job.get("error") or reply.get("error") or "cliamp: %s failed" % op
+        raise Fail(err if isinstance(err, str) else json.dumps(err)[:160])
+    return job.get("result") or {}
+
+
+def submit(op, params):
+    reply = cliamp(["remote", "call", op, "--params", json.dumps(params)], 10)
+    job = reply.get("job") or {}
+    if not job.get("id"):
+        raise Fail("cliamp did not accept %s" % op)
+    return job["id"]
+
+
+def snapshot():
+    return (cliamp(["remote", "state"], 5).get("snapshot") or {})
+
+
+def current_track(expected=""):
+    track = snapshot().get("track") or {}
+    if not track.get("path"):
+        raise Fail("nothing is playing in cliamp")
+    if expected and track["path"] != expected:
+        raise Fail("the track changed, try again")
+    return track
+
+
+# --- favorites.toml (mirrors cliamp's favorites package) -------------------
+
+def go_quote(s):
+    """Go's strconv.Quote, which cliamp writes with fmt's %q."""
+    o = ['"']
+    for ch in s:
+        c = ord(ch)
+        if ch == '"' or ch == "\\":
+            o.append("\\" + ch)
+        elif ch in "\a\b\f\n\r\t\v":
+            o.append({"\a": "\\a", "\b": "\\b", "\f": "\\f", "\n": "\\n",
+                      "\r": "\\r", "\t": "\\t", "\v": "\\v"}[ch])
+        elif ch == " " or (c >= 0x20 and unicodedata.category(ch)[0] in "LMNPS"):
+            o.append(ch)
+        elif c < 0x80:
+            o.append("\\x%02x" % c)
+        elif c < 0x10000:
+            o.append("\\u%04x" % c)
+        else:
+            o.append("\\U%08x" % c)
+    o.append('"')
+    return "".join(o)
+
+
+def go_unquote(s):
+    """strconv.Unquote for double-quoted strings; cliamp falls back to a
+    naive strip when that fails, so do the same."""
+    if len(s) < 2 or s[0] != '"' or s[-1] != '"':
+        return s
+    body, buf, i = s[1:-1], bytearray(), 0
+    simple = {"a": 7, "b": 8, "f": 12, "n": 10, "r": 13, "t": 9, "v": 11,
+              "\\": 92, "'": 39, '"': 34}
+    try:
+        while i < len(body):
+            ch = body[i]
+            if ch == '"':
+                raise ValueError
+            if ch != "\\":
+                buf += ch.encode("utf-8")
+                i += 1
+                continue
+            e = body[i + 1]
+            if e in simple:
+                buf.append(simple[e])
+                i += 2
+            elif e == "x":
+                buf.append(int(body[i + 2:i + 4], 16))
+                i += 4
+            elif e in "01234567":
+                buf.append(int(body[i + 1:i + 4], 8))
+                i += 4
+            elif e in "uU":
+                n = 4 if e == "u" else 8
+                buf += chr(int(body[i + 2:i + 2 + n], 16)).encode("utf-8")
+                i += 2 + n
+            else:
+                raise ValueError
+        return buf.decode("utf-8", errors="surrogateescape")
+    except (ValueError, IndexError):
+        return body
+
+
+def split_entries(text):
+    """Raw text blocks, one per [[entry]], plus the decoded path of each."""
+    blocks, cur = [], None
+    for line in text.splitlines(keepends=True):
+        if line.strip() == "[[entry]]":
+            cur = [line]
+            blocks.append(cur)
+        elif cur is not None:
+            cur.append(line)
+    result = []
+    for b in blocks:
+        path = ""
+        for line in b[1:]:
+            key, sep, val = line.strip().partition("=")
+            if sep and key.strip() == "path":
+                path = go_unquote(val.strip())
+        body = "".join(b).rstrip("\n") + "\n"
+        result.append((path, body))
+    return result
+
+
+def new_entry(track):
+    lines = ["[[entry]]",
+             "favorited_at = " + go_quote(time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())),
+             "path = " + go_quote(track["path"]),
+             "title = " + go_quote(track.get("title") or "")]
+    for key in ("artist", "album", "genre"):
+        if track.get(key):
+            lines.append("%s = %s" % (key, go_quote(track[key])))
+    for key in ("year", "track_number", "duration_secs"):
+        if int(track.get(key) or 0):
+            lines.append("%s = %d" % (key, int(track[key])))
+    for key in ("feed", "realtime"):
+        if track.get(key) is True:
+            lines.append("%s = true" % key)
+    for k, v in (track.get("provider_meta") or {}).items():
+        lines.append("provider_meta.%s = %s" % (k, go_quote(str(v))))
+    return "\n".join(lines) + "\n"
+
+
+def fav_file():
+    return os.path.join(config_dir(), "favorites.toml")
+
+
+def read_favs():
+    try:
+        with open(fav_file(), encoding="utf-8", errors="surrogateescape") as f:
+            return f.read()
+    except FileNotFoundError:
+        return ""
+    except OSError as e:
+        raise Fail("cannot read favorites: %s" % e.strerror)
+
+
+def is_fav(path):
+    return bool(path) and any(p == path for p, _ in split_entries(read_favs()))
+
+
+def write_atomic(path, data):
+    d = os.path.dirname(path)
+    fd, tmp = tempfile.mkstemp(prefix=".favorites.toml.", dir=d)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", errors="surrogateescape") as f:
+            f.write(data)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    try:
+        dfd = os.open(d, os.O_RDONLY)
+        try:
+            os.fsync(dfd)
+        finally:
+            os.close(dfd)
+    except OSError:
+        pass
+
+
+def toggle_fav(expected):
+    track = current_track(expected)
+    os.makedirs(config_dir(), mode=0o700, exist_ok=True)
+    try:
+        lock = open(fav_file() + ".lock", "a+")
+    except OSError as e:
+        raise Fail("cannot lock favorites: %s" % e.strerror)
+    with lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        entries = split_entries(read_favs())
+        kept = [body for p, body in entries if p != track["path"]]
+        now_fav = len(kept) == len(entries)
+        if now_fav:
+            kept.insert(0, new_entry(track))
+        try:
+            write_atomic(fav_file(), "\n".join(kept))
+        except OSError as e:
+            raise Fail("cannot write favorites: %s" % e.strerror)
+    return {"ok": True, "fav": now_fav}
+
+
+# --- playlists --------------------------------------------------------------
+
+def local_lists():
+    res = call("provider.playlists", {"provider": "local", "offset": 0, "limit": 500})
+    return [p for p in res.get("playlists") or [] if p.get("id") not in VIRTUAL_LISTS]
+
+
+def local_paths(list_id):
+    paths, off = [], 0
+    while True:
+        res = call("provider.tracks", {"provider": "local", "playlist": list_id, "offset": off, "limit": 500})
+        batch = res.get("tracks") or []
+        paths += [t.get("path") for t in batch]
+        off += len(batch)
+        if not batch or off >= int(res.get("total") or 0):
+            return paths
+
+
+def main(argv):
+    cmd, args = (argv[0] if argv else ""), argv[1:]
+    if cmd == "state":
+        snap = snapshot()
+        path = (snap.get("track") or {}).get("path") or ""
+        try:
+            fav = is_fav(path)
+        except Fail:
+            fav = False
+        return {"ok": True, "path": path, "shuffle": snap.get("shuffle") is True,
+                "repeat": snap.get("repeat") or "Off", "fav": fav}
+    if cmd == "fav":
+        return toggle_fav(args[0] if args else "")
+    if cmd == "shuffle":
+        return {"ok": True, "shuffle": call("shuffle").get("shuffle") is True}
+    if cmd == "repeat":
+        return {"ok": True, "repeat": call("repeat").get("repeat") or "Off"}
+    if cmd == "providers":
+        res = call("provider.list")
+        return {"ok": True, "providers": [{"key": p.get("key"), "name": p.get("name")}
+                                          for p in res.get("providers") or []]}
+    if cmd == "playlists":
+        prov, off, n = args[0], int(args[1]), int(args[2])
+        # A cold Spotify catalogue can take a while; cliamp caches it after.
+        res = call("provider.playlists", {"provider": prov, "offset": off, "limit": n}, timeout=90)
+        lists = res.get("playlists") or []
+        # Radio's "Use my location" row needs cliamp's interactive consent.
+        items = [{"id": p.get("id"), "name": p.get("name") or p.get("id"),
+                  "section": p.get("section") or "", "count": int(p.get("track_count") or 0)}
+                 for p in lists if not str(p.get("id", "")).startswith("loc:")]
+        return {"ok": True, "total": int(res.get("total") or 0) - (len(lists) - len(items)), "items": items}
+    if cmd == "load":
+        # The finished job carries every track (MBs for big libraries), so
+        # don't wait for it; the card follows the track change instead.
+        return {"ok": True, "job": submit("provider.load", {"provider": args[0], "playlist": args[1]})}
+    if cmd == "targets":
+        path = args[0]
+        return {"ok": True, "items": [{"provider": "local", "id": p["id"], "name": p.get("name") or p["id"],
+                                       "has": path in local_paths(p["id"])} for p in local_lists()]}
+    if cmd == "sptargets":
+        res = call("provider.playlists", {"provider": "spotify", "offset": 0, "limit": 1000}, timeout=90)
+        return {"ok": True, "items": [{"provider": "spotify", "id": p.get("id"), "name": p.get("name") or p.get("id"),
+                                       "has": None}
+                                      for p in res.get("playlists") or [] if p.get("section") == "Your playlists"]}
+    if cmd == "add":
+        prov, list_id, path = args[0], args[1], args[2]
+        track = current_track(path)
+        call("playlist.add", {"provider": prov, "playlist": list_id, "track": track}, timeout=30)
+        return {"ok": True}
+    if cmd == "remove":
+        list_id, path = args[0], args[1]
+        paths = local_paths(list_id)
+        if path not in paths:
+            raise Fail("not in that playlist")
+        call("playlist.remove", {"provider": "local", "playlist": list_id, "index": paths.index(path)})
+        return {"ok": True}
+    raise Fail("unknown command: %s" % cmd)
+
+
+if __name__ == "__main__":
+    try:
+        out(main(sys.argv[1:]))
+    except Fail as e:
+        out({"ok": False, "error": str(e)})
+    except (IndexError, ValueError):
+        out({"ok": False, "error": "bad arguments"})

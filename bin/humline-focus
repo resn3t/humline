@@ -1,10 +1,10 @@
 #!/bin/bash
 # Focus the window (and herdr tab) that hosts an MPRIS player.
-# Usage: nowpip-focus <mpris-dbus-name> [track-title]
+# Usage: humline-focus <mpris-dbus-name> [track-title]
 # Optional herdr support: jumps to the herdr tab that runs the player.
 
 set -u
-bus=${1:?usage: nowpip-focus <mpris-dbus-name> [track-title]}
+bus=${1:?usage: humline-focus <mpris-dbus-name> [track-title]}
 title=${2:-}
 
 pid=$(busctl --user call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus \
