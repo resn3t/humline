@@ -328,7 +328,10 @@ BarWidget {
       anchors.fill: parent
       onMoveRequested: function(dx, dy) { root.cardMove(dx, dy) }
       onActivateRequested: if (root.view === "main" && root.activePlayer) root.activePlayer.togglePlaying()
-      onCloseRequested: { if (root.view !== "main") root.view = "main"; else root.popupOpen = false }
+      onCloseRequested: {
+        if (root.view !== "main") { if (!(pageLoader.item && pageLoader.item.leaveFolder())) root.view = "main" }
+        else root.popupOpen = false
+      }
       onTabRequested: function(direction) { if (root.view === "main") root.cycleSource(direction) }
       onTextKey: function(text) { root.cardKey(text) }
 

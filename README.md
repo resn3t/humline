@@ -43,6 +43,8 @@ The bar face is just this: ![the bar widget](docs/bar.png)
     remove the track) and, on request, your own Spotify playlists.
   - **Browse:** one tab per cliamp provider (Radio, Local, Podcasts,
     Spotify…); pick a playlist or station to play it.
+    Radio entries that are lists of stations (like "cliamp radio") open as a
+    folder: pick a station to play it, Esc goes back.
 
 ## Compatibility
 
@@ -178,8 +180,10 @@ Other facts:
 
 - Like every Omarchy plugin, Humline runs unsandboxed inside your shell.
   Read the code before installing; it's short.
-- Privacy: the only network request Humline makes itself is a Spotify oEmbed
-  lookup for a cover when a player reports a `spotify:track:` without one.
+- Privacy: Humline itself makes two kinds of network request: a Spotify oEmbed
+  lookup for a cover when a player reports a `spotify:track:` without one, and,
+  only when you open a radio station list in the browser, one download of that
+  list's `.m3u`/`.pls` address as reported by cliamp (http/https only, 256 KB max).
 
 ## Legal
 

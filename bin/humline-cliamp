@@ -25,6 +25,7 @@ import sys
 import tempfile
 import time
 import unicodedata
+import urllib.request
 
 VIRTUAL_LISTS = {"Favorites", "Recently Played"}
 
@@ -282,6 +283,45 @@ def toggle_fav(expected):
     return {"ok": True, "fav": now_fav}
 
 
+# --- station lists (.m3u / .pls) ---------------------------------------------
+
+LIST_EXTS = (".m3u", ".m3u8", ".pls")
+
+
+def is_list_url(path):
+    base = str(path or "").split("?", 1)[0].lower()
+    return base.startswith(("http://", "https://")) and base.endswith(LIST_EXTS)
+
+
+def parse_station_list(text):
+    """Entries of an .m3u or .pls list as [{"id": url, "name": title}]."""
+    entries, pending, pls = [], "", {}
+    for raw in text.splitlines():
+        line = raw.strip()
+        if line.startswith("#EXTINF:"):
+            pending = line.partition(",")[2].strip()
+        elif line.lower().startswith(("file", "title")) and "=" in line:
+            key, _, val = line.partition("=")
+            pls[key.strip().lower()] = val.strip()
+        elif line and not line.startswith("#"):
+            if line.lower().startswith(("http://", "https://")):
+                entries.append({"id": line, "name": pending or line})
+            pending = ""
+    for key, val in pls.items():
+        if key.startswith("file") and val.lower().startswith(("http://", "https://")):
+            entries.append({"id": val, "name": pls.get("title" + key[4:]) or val})
+    return entries[:200]
+
+
+def fetch_list(url):
+    req = urllib.request.Request(url, headers={"User-Agent": "humline"})
+    try:
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            return resp.read(262144).decode("utf-8", errors="replace")
+    except (OSError, ValueError):
+        raise Fail("could not read the station list")
+
+
 # --- playlists --------------------------------------------------------------
 
 def local_lists():
@@ -332,6 +372,22 @@ def main(argv):
                   "section": p.get("section") or "", "count": int(p.get("track_count") or 0)}
                  for p in lists if not str(p.get("id", "")).startswith("loc:")]
         return {"ok": True, "total": int(res.get("total") or 0) - (len(lists) - len(items)), "items": items}
+    if cmd == "expand":
+        # Some radio entries are a list of stations (.m3u) that cliamp loads as
+        # one stream; show the stations so one can be picked.
+        tracks = call("provider.tracks", {"provider": args[0], "playlist": args[1], "offset": 0, "limit": 2}).get("tracks") or []
+        if len(tracks) == 1 and is_list_url(tracks[0].get("path")):
+            items = parse_station_list(fetch_list(tracks[0]["path"]))
+            if items:
+                return {"ok": True, "folder": True, "items": items}
+        return {"ok": True, "folder": False}
+    if cmd == "playurl":
+        if not str(args[0]).lower().startswith(("http://", "https://")):
+            raise Fail("not a stream address")
+        call("queue.clear", writes=True)
+        call("queue", {"path": args[0]}, writes=True)
+        call("queue.play", {"index": 0}, writes=True)
+        return {"ok": True}
     if cmd == "load":
         # The finished job carries every track (MBs for big libraries), so
         # don't wait for it; the card follows the track change instead.

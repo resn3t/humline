@@ -53,6 +53,23 @@ class EntryTests(unittest.TestCase):
         self.assertEqual([p for p, _ in helper.split_entries(text)], ["/music/a.flac", 'x "y"'])
 
 
+class StationListTests(unittest.TestCase):
+    def test_m3u(self):
+        text = "#EXTM3U\n#EXTINF:-1,Lofi\nhttps://x.test/lofi\n#EXTINF:-1,Synth\nhttp://x.test/synth\nfile:///etc/passwd\n"
+        self.assertEqual(helper.parse_station_list(text), [
+            {"id": "https://x.test/lofi", "name": "Lofi"}, {"id": "http://x.test/synth", "name": "Synth"}])
+
+    def test_pls(self):
+        text = "[playlist]\nFile1=https://x.test/a\nTitle1=Alpha\nFile2=https://x.test/b\n"
+        self.assertEqual(helper.parse_station_list(text), [
+            {"id": "https://x.test/a", "name": "Alpha"}, {"id": "https://x.test/b", "name": "https://x.test/b"}])
+
+    def test_is_list_url(self):
+        self.assertTrue(helper.is_list_url("https://radio.test/streams.m3u?x=1"))
+        self.assertFalse(helper.is_list_url("https://radio.test/stream"))
+        self.assertFalse(helper.is_list_url("/local/file.m3u"))
+
+
 class ToggleTests(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()

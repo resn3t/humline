@@ -1,0 +1,23 @@
+name: CI
+on:
+  push:
+  pull_request:
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Python tests
+        run: python3 -m unittest discover -s tests -v
+      - name: Shell scripts
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          bash -n bin/humline-focus tools/footprint.sh
+          shellcheck bin/humline-focus tools/footprint.sh
+      - name: Manifest
+        run: |
+          jq -e '.id and .version and .license and (.entryPoints | length > 0)' manifest.json
+          for f in $(jq -r '.entryPoints[]' manifest.json); do test -f "$f"; done
+      - name: Match the tag to the manifest version
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: test "v$(jq -r .version manifest.json)" = "${GITHUB_REF_NAME}"

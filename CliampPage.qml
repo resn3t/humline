@@ -27,12 +27,17 @@ Column {
   property string trackPath: ""
   property string trackTitle: ""
   property bool spotifyLoaded: false
+  // A radio entry that is itself a list of stations ("folder"): its entries
+  // are shown here, paged client-side, and picking one plays it.
+  property string folderName: ""
+  property var folderItems: []
+  property int folderBackOffset: 0
   // A cold Spotify catalogue stalls cliamp for seconds: only on request.
   property bool spotifyAsked: false
   readonly property bool spotifyWaiting: browsing && page.widget.browseProvider === "spotify" && !spotifyAsked
 
-  readonly property var shown: browsing ? items : items.slice(offset, offset + pageSize)
-  readonly property int count: browsing ? total : items.length
+  readonly property var shown: browsing && !folderName ? items : (browsing ? folderItems : items).slice(offset, offset + pageSize)
+  readonly property int count: browsing ? (folderName ? folderItems.length : total) : items.length
   readonly property bool spotifyTrack: trackPath.indexOf("spotify:") === 0
   readonly property string itemFont: page.widget.bar.fontFamily
 
@@ -115,16 +120,63 @@ Column {
     var ctl = page.widget.cliamp
     if (!ctl || ctl.busy || loading) return
     var key = item.provider + "|" + item.id
-    if (browsing) {
+    if (browsing && folderName) {
       pendingKey = key
-      ctl.run(["load", page.widget.browseProvider, item.id], function(r) {
+      ctl.run(["playurl", item.id], function(r) {
         page.pendingKey = ""
         if (!r.ok) return
-        ctl.flash("Loading " + item.name + "…")
+        ctl.flash("Playing " + item.name + "…")
         page.widget.view = "main"
       }, page)
       return
     }
+    if (browsing && page.widget.browseProvider === "radio" && String(item.id).indexOf("l:") === 0) {
+      pendingKey = key
+      ctl.run(["expand", "radio", item.id], function(r) {
+        page.pendingKey = ""
+        if (!r.ok) return
+        if (r.folder) page.enterFolder(item.name, r.items)
+        else page.loadList(item)
+      }, page)
+      return
+    }
+    if (browsing) {
+      page.loadList(item)
+      return
+    }
+    activateTarget(item, key)
+  }
+
+  function enterFolder(name, entries) {
+    folderBackOffset = offset
+    folderName = name
+    folderItems = entries
+    offset = 0
+    error = entries.length ? "" : "Nothing here"
+  }
+
+  // Esc / back: leave a station list first, then the browser.
+  function leaveFolder() {
+    if (!folderName) return false
+    folderName = ""
+    folderItems = []
+    offset = folderBackOffset
+    return true
+  }
+
+  function loadList(item) {
+    var ctl = page.widget.cliamp
+    pendingKey = item.provider + "|" + item.id
+    ctl.run(["load", page.widget.browseProvider, item.id], function(r) {
+      page.pendingKey = ""
+      if (!r.ok) return
+      ctl.flash("Loading " + item.name + "…")
+      page.widget.view = "main"
+    }, page)
+  }
+
+  function activateTarget(item, key) {
+    var ctl = page.widget.cliamp
     var removing = item.has === true
     if (removing && item.provider !== "local") return
     pendingKey = key
@@ -163,6 +215,8 @@ Column {
   }
 
   onBrowsingChanged: {
+    folderName = ""
+    folderItems = []
     items = []
     total = 0
     offset = 0
@@ -189,6 +243,8 @@ Column {
     target: page.widget
     function onBrowseProviderChanged() {
       if (!page.browsing) return
+      page.folderName = ""
+      page.folderItems = []
       page.total = 0
       page.showPage(0)
     }
@@ -252,14 +308,14 @@ Column {
       horizontalPadding: Style.spacing.controlPaddingY
       verticalPadding: Style.spacing.controlPaddingY
       tooltipText: "Back (Esc)"
-      onClicked: page.widget.view = "main"
+      onClicked: { if (!page.leaveFolder()) page.widget.view = "main" }
     }
 
     Text {
       anchors.verticalCenter: parent.verticalCenter
       width: parent.width - backButton.width - parent.spacing
       textFormat: Text.PlainText
-      text: page.browsing ? "Browse cliamp" : "Add “" + (page.trackTitle || page.widget.title) + "” to…"
+      text: page.browsing ? (page.folderName || "Browse cliamp") : "Add “" + (page.trackTitle || page.widget.title) + "” to…"
       color: page.widget.bar.foreground
       font.family: page.itemFont
       font.pixelSize: Style.font.body
@@ -269,7 +325,7 @@ Column {
   }
 
   Flow {
-    visible: page.browsing && page.providers.length > 1
+    visible: page.browsing && !page.folderName && page.providers.length > 1
     width: parent.width
     spacing: Style.space(4)
 
