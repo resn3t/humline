@@ -15,10 +15,9 @@ to earn its bytes: Humline stays small and needs no new runtime dependencies.
 
 ## 2.0 must-have
 
-- Reproducible footprint script plus published numbers and method, and a
+- Footprint script done in 1.2.0; still to do: a
   fair side-by-side with the built-in `omarchy.media` widget.
-- Keyboard use of the card. Popups get no keyboard focus today; find a
-  layer-shell route or document global IPC keybindings for the same actions.
+- ~~Keyboard use of the card~~ done in 1.2.0 (Omarchy's `KeyboardPanel`).
 - Verify one `cava` per monitor and remove duplicates on multi-monitor setups.
 - Listing in the Omarchy plugin marketplace, tagged releases with notes.
 - Decide the plugin id policy (`humline` today; a namespaced id would break
@@ -28,7 +27,7 @@ to earn its bytes: Humline stays small and needs no new runtime dependencies.
 
 - Adapt to crowded bars (shrink, then hide the spectrum) instead of a fixed
   width.
-- Tiny settings: hide when paused, dot count/width.
+- ~~Tiny settings: hide when paused, dot count~~ done in 1.2.0.
 - Ignore noise players (notification sounds, games).
 - Refresh cliamp's heart marker live if cliamp gains a remote favorites
   command.

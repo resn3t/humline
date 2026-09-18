@@ -33,6 +33,10 @@ BarWidget {
   }
   property bool cavaMissing: false
 
+  // Tunable from the manifest schema (shell.json entry).
+  readonly property bool hideWhenPaused: setting("hideWhenPaused", false) === true
+  readonly property int dotCount: Math.max(4, Math.min(10, Math.round(Number(setting("dotCount", 10)) || 10)))
+
   function playerKey(player) { return player ? String(player.dbusName || "") : "" }
   function selectPlayer(player) { selectedKey = playerKey(player) }
   function localPath(name) { return decodeURIComponent(String(Qt.resolvedUrl(name)).replace(/^file:\/\//, "")) }
@@ -40,10 +44,19 @@ BarWidget {
   readonly property bool hasMedia: activePlayer !== null && (activePlayer.trackTitle || activePlayer.trackArtist)
   readonly property string title: activePlayer ? (activePlayer.trackTitle || "") : ""
   readonly property string artist: activePlayer ? (activePlayer.trackArtist || "") : ""
+  // Ads and some streams send no title; show the player instead of a blank.
+  readonly property string displayTitle: title || (activePlayer ? (activePlayer.identity || "") : "")
 
   readonly property bool playing: hasMedia && activePlayer.isPlaying
   readonly property bool canSetVolume: !!activePlayer && activePlayer.volumeSupported === true
   property var bands: []
+  // The bar face shows dotCount bands sampled evenly from cava's ten.
+  readonly property var barBands: {
+    if (dotCount >= bands.length) return bands
+    var out = []
+    for (var i = 0; i < dotCount; i++) out.push(bands[Math.floor(i * bands.length / dotCount)])
+    return out
+  }
 
   readonly property string trackUrl: activePlayer && activePlayer.metadata ? String(activePlayer.metadata["xesam:url"] || "") : ""
   readonly property string spotifyTrackId: {
@@ -153,6 +166,36 @@ BarWidget {
 
   function close() { popupOpen = false }
 
+  // Card keys (KeyboardPanel): arrows/hjkl, Space, Tab and letters.
+  function cycleSource(direction) {
+    var players = sourcePlayers
+    if (players.length < 2) return
+    var at = 0
+    for (var i = 0; i < players.length; i++) if (playerKey(players[i]) === playerKey(activePlayer)) at = i
+    selectPlayer(players[(at + direction + players.length) % players.length])
+  }
+
+  function cardMove(dx, dy) {
+    if (view !== "main") { if (pageLoader.item && dx !== 0) pageLoader.item.step(dx); return }
+    if (!activePlayer) return
+    if (dx > 0 && activePlayer.canGoNext) activePlayer.next()
+    else if (dx < 0 && activePlayer.canGoPrevious) activePlayer.previous()
+    else if (dy !== 0 && canSetVolume) setVolume(activePlayer.volume - dy * 0.05)
+  }
+
+  function cardKey(text) {
+    if (view !== "main" || !activePlayer) return
+    var k = text.toLowerCase()
+    if (k === "s") toggleShuffle()
+    else if (k === "r") cycleLoop()
+    else if (k === "g") focusPlayer(activePlayer)
+    else if (k === ",") { activePlayer.positionChanged(); seekTo(activePlayer.position - 10) }
+    else if (k === ".") { activePlayer.positionChanged(); seekTo(activePlayer.position + 10) }
+    else if (isCliamp && k === "f") { if (cliamp) cliamp.toggleFavorite() }
+    else if (isCliamp && k === "a") view = "lists"
+    else if (isCliamp && k === "b") view = "browse"
+  }
+
   function focusPlayer(player) {
     if (!player || !player.dbusName) return
     popupOpen = false
@@ -167,8 +210,9 @@ BarWidget {
 
   onPlayingChanged: if (!playing) bands = []
 
-  visible: hasMedia
-  implicitWidth: hasMedia ? (playing ? barSpectrum.implicitWidth : glyph.implicitWidth) + Style.space(12) : 0
+  readonly property bool shown: hasMedia && (playing || popupOpen || !hideWhenPaused)
+  visible: shown
+  implicitWidth: shown ? (playing ? barSpectrum.implicitWidth : glyph.implicitWidth) + Style.space(12) : 0
   implicitHeight: barSize
 
   // cava analyses the actual PipeWire output, so the spectrum works for any player.
@@ -262,7 +306,8 @@ BarWidget {
     id: barSpectrum
     anchors.centerIn: parent
     visible: root.playing && !root.cavaMissing
-    bands: root.bands
+    bands: root.barBands
+    bandCount: root.dotCount
     rows: 5
     dotWidth: 3
     dotHeight: 2
@@ -309,19 +354,29 @@ BarWidget {
       if (wheel.angleDelta.y > 0 && root.activePlayer.canGoPrevious) root.activePlayer.previous()
       else if (wheel.angleDelta.y < 0 && root.activePlayer.canGoNext) root.activePlayer.next()
     }
-    onEntered: if (root.bar && !root.popupOpen) root.bar.showTooltip(root, root.hasMedia ? (root.title + (root.artist ? " — " + root.artist : "") + "\nRight-click: go to player") : "")
+    onEntered: if (root.bar && !root.popupOpen) root.bar.showTooltip(root, root.hasMedia ? (root.displayTitle + (root.artist ? " — " + root.artist : "") + "\nRight-click: go to player") : "")
     onExited: if (root.bar) root.bar.hideTooltip(root)
   }
 
-  PopupCard {
+  KeyboardPanel {
     id: popup
     anchorItem: root
     bar: root.bar
     owner: root
     open: root.popupOpen
+    focusTarget: keyCatcher
     onVisibleChanged: if (!visible) root.view = "main"
     contentWidth: popup.fittedContentWidth(Style.space(320))
     contentHeight: popup.fittedContentHeight(column.implicitHeight)
+
+    PanelKeyCatcher {
+      id: keyCatcher
+      anchors.fill: parent
+      onMoveRequested: function(dx, dy) { root.cardMove(dx, dy) }
+      onActivateRequested: if (root.view === "main" && root.activePlayer) root.activePlayer.togglePlaying()
+      onCloseRequested: { if (root.view !== "main") root.view = "main"; else root.popupOpen = false }
+      onTabRequested: function(direction) { if (root.view === "main") root.cycleSource(direction) }
+      onTextKey: function(text) { root.cardKey(text) }
 
     Column {
       id: column
@@ -341,8 +396,6 @@ BarWidget {
         width: parent.width
         visible: pageLoader.item === null
         spacing: Style.space(10)
-        focus: visible
-        Keys.onEscapePressed: root.popupOpen = false
 
         Row {
           spacing: Style.space(10)
@@ -386,7 +439,7 @@ BarWidget {
 
             Text {
               textFormat: Text.PlainText
-              text: root.title || "Nothing playing"
+              text: root.displayTitle || "Nothing playing"
               color: root.bar.foreground
               font.family: root.bar.fontFamily
               font.pixelSize: Style.font.subtitle
@@ -744,6 +797,7 @@ BarWidget {
           }
         }
       }
+    }
     }
   }
 

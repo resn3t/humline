@@ -77,12 +77,35 @@ o.bind("SUPER + M", "Now playing", "omarchy-shell -q humline togglePopup")
 
 | Action | Result |
 | --- | --- |
-| Left-click | open/close the card (click outside to dismiss) |
+| Left-click | open/close the card (click outside or press Esc to dismiss) |
 | Right-click | jump to the player |
 | Middle-click | play/pause |
 | Scroll | previous/next track |
 | Seek bar | drag, or scroll for ±10 s |
 | Volume slider | drag, or scroll for ±5 % |
+
+### Keyboard (card open)
+
+| Key | Action |
+| --- | --- |
+| `Space` / `Enter` | play/pause |
+| `←` `→` (or `h` `l`) | previous / next track |
+| `↑` `↓` (or `k` `j`) | volume ±5 % |
+| `,` `.` | seek −10 s / +10 s |
+| `Tab` / `Shift+Tab` | switch between players |
+| `s` / `r` | shuffle / repeat |
+| `g` | go to the player |
+| `f` `a` `b` | cliamp only: favorite, add to playlist, browse |
+| `Esc` | back from the browser, or close the card |
+
+In the cliamp browser and playlist picker, `←` `→` page through the list.
+
+### Settings
+
+The widget settings in Omarchy's bar configuration offer **Hide when
+paused** (remove Humline from the bar while nothing plays) and **Spectrum dots**
+(4 to 10 columns on the bar face; the card always shows ten). No card content
+depends on them.
 
 IPC for scripts and keybindings:
 
@@ -112,6 +135,18 @@ playing). These are my numbers, not a benchmark against other plugins.
 
 Each click on a cliamp action runs one short-lived helper process.
 
+Measure it yourself with `tools/footprint.sh "<label>" [seconds]` (reads
+`/proc`, changes nothing). One row per state, same track, card closed. v1.2.0
+on my machine, 20 s samples, one test tone via mpv:
+
+| State | Shell RSS | CPU (shell + children) | Child processes |
+| --- | --- | --- | --- |
+| Paused | 347 MB | 0.9 % | none from Humline (`inotifywait`, `wl-paste` are the shell's) |
+| Playing | 347 MB | 6.3 % | + one `cava` |
+
+CPU while playing is mostly the shell redrawing the spectrum plus `cava`
+itself.
+
 ## Known limits
 
 - **cliamp's heart marker:** cliamp has no remote command for favorites, so
@@ -132,8 +167,6 @@ Each click on a cliamp action runs one short-lived helper process.
   the track URL. If several browser windows are open and none matches,
   Humline does not jump (it never guesses). Web apps (their own window) work
   best; in a normal browser it may not select the playing tab.
-- The card takes no keyboard input (Esc, arrows): Omarchy's popups only grab
-  the pointer. Click outside to dismiss.
 - With several monitors, each bar runs its own `cava` while audio plays (not
   measured).
 

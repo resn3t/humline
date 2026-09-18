@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "humline",
   "name": "Humline Player",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "author": "resn3t",
   "description": "Humline Player: a tiny now-playing bar widget for any MPRIS player, with a live cava dot spectrum and a themed card; extra hearts, playlists and a source browser for cliamp",
   "kinds": [
@@ -16,6 +16,30 @@
     "description": "Live dot spectrum, seek, volume and jump-to-player; extras for cliamp",
     "category": "Media",
     "defaultSection": "center",
-    "allowMultiple": false
-  }
+    "allowMultiple": false,
+    "defaults": {
+      "hideWhenPaused": false,
+      "dotCount": 10
+    },
+    "schema": [
+      {
+        "key": "hideWhenPaused",
+        "type": "boolean",
+        "label": "Hide when paused",
+        "description": "Remove Humline from the bar while nothing is playing.",
+        "defaultValue": false
+      },
+      {
+        "key": "dotCount",
+        "type": "integer",
+        "label": "Spectrum dots",
+        "description": "Number of spectrum columns on the bar face (the card always shows ten).",
+        "min": 4,
+        "max": 10,
+        "step": 1,
+        "defaultValue": 10
+      }
+    ]
+  },
+  "license": "MIT"
 }

@@ -234,15 +234,10 @@ Column {
     }
   }
 
-  // Esc goes back to the card; arrows page through the list.
-  Item {
-    id: keyCatcher
-    width: 0
-    height: 0
-    focus: true
-    Keys.onEscapePressed: page.widget.view = "main"
-    Keys.onLeftPressed: if (page.offset > 0) page.showPage(page.offset - page.pageSize)
-    Keys.onRightPressed: if (page.offset + page.pageSize < page.count) page.showPage(page.offset + page.pageSize)
+  // The card's key handler (arrows, Esc) calls this to page through the list.
+  function step(direction) {
+    if (direction < 0 && page.offset > 0) page.showPage(page.offset - page.pageSize)
+    else if (direction > 0 && page.offset + page.pageSize < page.count) page.showPage(page.offset + page.pageSize)
   }
 
   Row {
