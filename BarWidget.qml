@@ -156,7 +156,8 @@ BarWidget {
   function focusPlayer(player) {
     if (!player || !player.dbusName) return
     popupOpen = false
-    focusProc.command = ["bash", localPath("bin/humline-focus"), String(player.dbusName), String(player.trackTitle || "")]
+    focusProc.command = ["bash", localPath("bin/humline-focus"), String(player.dbusName), String(player.trackTitle || ""),
+                       String((player.metadata && player.metadata["xesam:url"]) || "")]
     focusProc.running = true
   }
 

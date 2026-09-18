@@ -1,34 +1,47 @@
-# Humline
+# Humline Player
 
-A compact now-playing widget for the Omarchy bar: a line of dots that hums
-along with whatever is playing, and a themed card with cover, seek bar,
-volume and jump-to-player. When the player is
-[cliamp](https://github.com/bjarneo/cliamp) it also gets likes, playlists and
+A tiny now-playing line for the [Omarchy](https://omarchy.org) bar. Ten dots
+hum along with whatever is playing; one click opens a themed card. Works with
+any MPRIS player, and when that player is
+[cliamp](https://github.com/bjarneo/cliamp) it also gets hearts, playlists and
 a source browser.
+
+![Humline Player: the card, and the cliamp source browser](preview.png)
+
+The bar face is just this: ![the bar widget](docs/bar.png)
 
 > **Unofficial, personal project.** I built Humline mainly for my own setup
 > (Omarchy + cliamp) and share it as-is. It is not made, endorsed or
 > supported by Omarchy, Basecamp, cliamp or any music service.
 
+## Why Humline
+
+- **Small on the bar, small in memory.** A 10-dot spectrum from real PipeWire
+  output ([cava](https://github.com/karlstav/cava)) and a pause glyph, no
+  labels or buttons taking up space.
+- **Pay only for what you open.** Nothing runs while nothing plays, the card
+  and the cliamp code load when you open the card and are released when you
+  close it (see [Footprint](#footprint)).
+- **cliamp-native when it matters.** Like a track, add it to a playlist or
+  browse radio/local/podcasts/Spotify without leaving the bar. Any other
+  player just gets the clean generic card.
+- **Jump to the source.** Right-click focuses the window playing the audio
+  (browser web app, terminal, even the right [herdr](https://herdr.dev) tab)
+  and leaves your mouse cursor where it was.
+
 ## Features
 
-- **Bar:** a tiny 10-band dotted spectrum while audio plays (real PipeWire
-  output via [cava](https://github.com/karlstav/cava)); a pause glyph when
-  paused. Works with any MPRIS player: browsers, web apps, mpv, terminal
-  players.
+- **Bar:** the dot spectrum while audio plays, a pause glyph when paused.
 - **Card:** cover art, title/artist/album, larger spectrum, seek bar,
   previous/play/next, shuffle/repeat (if the player supports them), volume.
-- **Jump to player:** focuses the window that is playing (browser, web app,
-  terminal) or even the right [herdr](https://herdr.dev) tab. The mouse
-  cursor stays put.
 - **Several players at once:** each gets its own row with play/pause and
   jump; click a row to make it the main one.
 - **cliamp extras** (only while cliamp is the active player):
-  - **Heart**: like/unlike the track in cliamp's Favorites (same as `n` in
+  - **Heart:** like/unlike the track in cliamp's Favorites (same as `n` in
     cliamp).
-  - **Add to playlist**: your local cliamp playlists (click a checked one to
+  - **Add to playlist:** your local cliamp playlists (click a checked one to
     remove the track) and, on request, your own Spotify playlists.
-  - **Browse**: one tab per cliamp provider (Radio, Local, Podcasts,
+  - **Browse:** one tab per cliamp provider (Radio, Local, Podcasts,
     Spotify…); pick a playlist or station to play it.
 
 ## Compatibility
@@ -85,6 +98,20 @@ omarchy-shell humline browseSource radio   # or local, podcast, spotify…
 omarchy-shell humline addToPlaylist
 ```
 
+## Footprint
+
+Measured on my machine (Omarchy 4.0, Hyprland 0.56, one monitor, cliamp
+playing). These are my numbers, not a benchmark against other plugins.
+
+| State | Result |
+| --- | --- |
+| Paused | no `cava` and no Humline process running |
+| Playing | one `cava` process |
+| Card open | omarchy-shell memory about +8 to +10 MB, released on close |
+| Ten open/close cycles | shell memory unchanged (361 MB before, 357 MB after) |
+
+Each click on a cliamp action runs one short-lived helper process.
+
 ## Known limits
 
 - **cliamp's heart marker:** cliamp has no remote command for favorites, so
@@ -101,14 +128,17 @@ omarchy-shell humline addToPlaylist
   so the slider shows 100 % until you move it.
 - Changes made in cliamp's own UI while the card is open show up on the next
   track change.
-- In a normal browser, jumping focuses the right window but not the playing
-  tab. Web apps (their own window) are fine.
+- Jumping to a browser picks the window by track title, then by the site of
+  the track URL. If several browser windows are open and none matches,
+  Humline does not jump (it never guesses). Web apps (their own window) work
+  best; in a normal browser it may not select the playing tab.
+- The card takes no keyboard input (Esc, arrows): Omarchy's popups only grab
+  the pointer. Click outside to dismiss.
+- With several monitors, each bar runs its own `cava` while audio plays (not
+  measured).
 
 ## Notes
 
-- Resource use: nothing extra runs while nothing is playing. cava runs
-  while audio plays, and the cliamp parts only load while the card is open.
-  Each click runs one short-lived helper process.
 - Like every Omarchy plugin, Humline runs unsandboxed inside your shell.
   Read the code before installing; it's short.
 - Privacy: the only network request Humline makes itself is a Spotify oEmbed

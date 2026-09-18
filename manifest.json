@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "id": "humline",
-  "name": "Humline",
-  "version": "1.1.0",
+  "name": "Humline Player",
+  "version": "1.1.1",
   "author": "resn3t",
-  "description": "Compact now-playing bar widget with a live dot spectrum, seek bar, volume and jump-to-player; extra controls for cliamp",
+  "description": "Humline Player: a tiny now-playing bar widget for any MPRIS player, with a live cava dot spectrum and a themed card; extra hearts, playlists and a source browser for cliamp",
   "kinds": [
     "bar-widget"
   ],
@@ -12,8 +12,8 @@
     "barWidget": "BarWidget.qml"
   },
   "barWidget": {
-    "displayName": "Humline",
-    "description": "Now playing with live spectrum, seek, volume and jump-to-player",
+    "displayName": "Humline Player",
+    "description": "Live dot spectrum, seek, volume and jump-to-player; extras for cliamp",
     "category": "Media",
     "defaultSection": "center",
     "allowMultiple": false

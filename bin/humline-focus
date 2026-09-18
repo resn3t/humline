@@ -1,11 +1,15 @@
 #!/bin/bash
 # Focus the window (and herdr tab) that hosts an MPRIS player.
-# Usage: humline-focus <mpris-dbus-name> [track-title]
+# Usage: humline-focus <mpris-dbus-name> [track-title] [xesam:url]
 # Optional herdr support: jumps to the herdr tab that runs the player.
 
 set -u
 bus=${1:?usage: humline-focus <mpris-dbus-name> [track-title]}
 title=${2:-}
+url=${3:-}
+# Host of the track URL (no scheme, port or leading www.), used to spot web-app windows.
+host=$(sed -E 's#^[a-zA-Z][a-zA-Z0-9+.-]*://([^/@]*@)?([^/:?]*).*#\2#; t; s#.*##' <<<"$url")
+host=${host#www.}
 
 pid=$(busctl --user call org.freedesktop.DBus /org/freedesktop/DBus org.freedesktop.DBus \
   GetConnectionUnixProcessID s "$bus" 2>/dev/null | awk '{print $2}')
@@ -67,17 +71,47 @@ for p in "${chain[@]}"; do
   fi
 done
 
-# Browsers switch to the playing tab on Raise; harmless for other players.
-if [[ $(busctl --user get-property "$bus" /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2 CanRaise 2>/dev/null) == "b true" ]]; then
-  busctl --user call "$bus" /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2 Raise >/dev/null 2>&1
-fi
+raise_player() {
+  # Browsers switch to the playing tab on Raise; harmless for other players.
+  if [[ $(busctl --user get-property "$bus" /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2 CanRaise 2>/dev/null) == "b true" ]]; then
+    busctl --user call "$bus" /org/mpris/MediaPlayer2 org.mpris.MediaPlayer2 Raise >/dev/null 2>&1
+  fi
+}
 
+# Pick the window for a pid. A browser runs every window (web apps included)
+# under one pid, so never guess: a single window wins, otherwise match the track
+# title, then the URL host. Prints "<how> <address>", or nothing.
 for p in "${chain[@]}"; do
-  addr=$(jq -r --argjson p "$p" --arg t "$title" '
-    [.[] | select(.pid == $p)] as $w
-    | (if $t != "" then [$w[] | select(.title | contains($t))][0] else null end) // $w[0]
-    | .address // empty' <<<"$clients")
-  if [[ -n $addr ]]; then focus_window "$addr"; exit 0; fi
+  found=$(jq -r --argjson p "$p" --arg t "$title" --arg h "$host" '
+    def norm: ascii_downcase | gsub("[^\\p{L}\\p{N}]+"; " ") | sub("^ +"; "") | sub(" +$"; "");
+    def strip: sub(" (youtube|chromium|google chrome|brave|firefox)$"; "");
+    ([.[] | select(.pid == $p)]) as $w
+    | ($t | norm | strip) as $nt
+    | ($h | ascii_downcase) as $hh
+    | ($hh | split(".") | if length > 1 then .[-2] else .[0] end) as $site
+    | (if ($w | length) == 1 then {how: "single", w: $w[0]}
+       elif ($w | length) == 0 then null
+       else
+         (if $nt != "" then ([$w[] | select((.title | norm | strip) | contains($nt))][0]) as $m
+            | (if $m then {how: "title", w: $m} else null end) else null end)
+         // (if $hh != "" then
+               ([$w[] | select(((.class | ascii_downcase) | contains($hh))
+                   or ((.title | norm) | test("(^| )" + $site + "( |$)")))]) as $m
+               | (([$m[] | select(.focusHistoryID == 0)][0] // $m[0]) as $x
+                  | if $x then {how: "host", w: $x} else null end)
+             else null end)
+       end)
+    | select(. != null) | "\(.how) \(.w.address)"' <<<"$clients")
+  if [[ -n $found ]]; then
+    how=${found%% *}
+    addr=${found#* }
+    # A window already matched by title/host shows the playing tab, and a browser's
+    # Raise can activate a different window (the last used one) after our focus.
+    [[ $how == single ]] && raise_player
+    focus_window "$addr"
+    exit 0
+  fi
 done
 
+raise_player
 exit 1
