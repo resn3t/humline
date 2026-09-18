@@ -69,8 +69,8 @@ BarWidget {
   property string view: "main"
   property string browseProvider: ""
   readonly property var cliamp: cliampLoader.item
-  // cliamp's own track path; MPRIS xesam:url until the first state reply.
-  readonly property string cliampPath: cliamp && cliamp.path ? cliamp.path : trackUrl
+  // Set by the controller; keeps it loaded until a running action finishes.
+  property bool cliampBusy: false
   readonly property string cliampHelper: localPath("bin/humline-cliamp")
 
   onIsCliampChanged: if (!isCliamp) view = "main"
@@ -206,7 +206,7 @@ BarWidget {
     id: cliampLoader
     // Stays loaded until a running action finishes, so closing the card
     // never drops a like/add/load halfway.
-    readonly property bool wanted: root.cliampOpen || (!!item && item.busy)
+    readonly property bool wanted: root.cliampOpen || root.cliampBusy
     onWantedChanged: root.loadOnDemand(cliampLoader, wanted, "CliampController.qml")
   }
 

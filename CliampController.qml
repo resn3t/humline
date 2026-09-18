@@ -15,8 +15,14 @@ Item {
   property bool fav: false
   // cliamp's own track path (MPRIS only has a URL-encoded xesam:url).
   property string path: ""
+  property string title: ""
   property string message: ""
-  readonly property bool busy: actionProc.running
+  // True from launch until the reply has been handled (not just on exit).
+  property bool busy: false
+  onBusyChanged: ctl.widget.cliampBusy = busy
+  Component.onDestruction: ctl.widget.cliampBusy = false
+  // A state reply was dropped because an action ran; refresh after it.
+  property bool stateStale: false
   // Bumped by every action so an older state reply can't undo its result.
   property int generation: 0
   property int stateGeneration: 0
@@ -33,6 +39,7 @@ Item {
     if (r.repeat !== undefined) repeat = r.repeat
     if (r.fav !== undefined) fav = r.fav
     if (r.path !== undefined) path = r.path
+    if (r.title !== undefined) title = r.title
   }
 
   function helper(args) {
@@ -50,20 +57,27 @@ Item {
   }
 
   // One action at a time; `done(reply)` runs after the helper exits.
-  function run(args, done) {
-    if (actionProc.running) {
+  function run(args, done, owner) {
+    if (busy) {
       flash("cliamp is busy…")
       return false
     }
     generation++
+    busy = true
     actionProc.done = done || null
+    actionProc.owner = owner || null
     actionProc.command = helper(args)
     actionProc.running = true
     return true
   }
 
   // A closing page drops its pending callback; the action still completes.
-  function detach() { actionProc.done = null }
+  function detach(owner) {
+    if (actionProc.owner === owner) {
+      actionProc.done = null
+      actionProc.owner = null
+    }
+  }
 
   function toggleFavorite() {
     run(["fav", path], function(r) {
@@ -76,30 +90,41 @@ Item {
 
   Connections {
     target: ctl.widget
-    function onTitleChanged() { refreshTimer.restart() }
-    function onTrackUrlChanged() { refreshTimer.restart() }
+    // Forget the old track at once so nothing acts on it meanwhile.
+    function onTitleChanged() { ctl.trackChanged() }
+    function onTrackUrlChanged() { ctl.trackChanged() }
+  }
+
+  function trackChanged() {
+    path = ""
+    title = ""
+    fav = false
+    refreshTimer.restart()
   }
 
   Timer { id: refreshTimer; interval: 400; onTriggered: ctl.refresh() }
+  Timer { id: againTimer; interval: 0; onTriggered: ctl.refresh() }
   Timer { id: messageTimer; interval: 3000; onTriggered: ctl.message = "" }
 
   Process {
     id: stateProc
     stdout: StdioCollector {
       onStreamFinished: {
-        if (ctl.stateGeneration === ctl.generation && !actionProc.running)
-          ctl.apply(ctl.widget.parseReply(text))
+        if (ctl.stateGeneration === ctl.generation && !ctl.busy) ctl.apply(ctl.widget.parseReply(text))
+        else if (ctl.busy) ctl.stateStale = true
+        else ctl.stateAgain = true
       }
     }
     onExited: if (ctl.stateAgain) {
       ctl.stateAgain = false
-      Qt.callLater(ctl.refresh)
+      againTimer.restart()
     }
   }
 
   Process {
     id: actionProc
     property var done: null
+    property var owner: null
     stdout: StdioCollector {
       onStreamFinished: {
         var r = ctl.widget.parseReply(text)
@@ -107,7 +132,13 @@ Item {
         else ctl.flash(r.error || "cliamp error")
         var cb = actionProc.done
         actionProc.done = null
+        actionProc.owner = null
+        ctl.busy = false
         if (cb) cb(r)
+        if (ctl.stateStale) {
+          ctl.stateStale = false
+          againTimer.restart()
+        }
       }
     }
   }

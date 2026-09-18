@@ -27,6 +27,9 @@ Column {
   property string trackPath: ""
   property string trackTitle: ""
   property bool spotifyLoaded: false
+  // A cold Spotify catalogue stalls cliamp for seconds: only on request.
+  property bool spotifyAsked: false
+  readonly property bool spotifyWaiting: browsing && page.widget.browseProvider === "spotify" && !spotifyAsked
 
   readonly property var shown: browsing ? items : items.slice(offset, offset + pageSize)
   readonly property int count: browsing ? total : items.length
@@ -61,9 +64,14 @@ Column {
   function fetch() {
     if (browsing) {
       if (!page.widget.browseProvider) request(["providers"])
-      else request(["playlists", page.widget.browseProvider, String(offset), String(pageSize)])
+      else if (spotifyWaiting) {
+        items = []
+        loading = false
+      } else request(["playlists", page.widget.browseProvider, String(offset), String(pageSize)])
     } else if (trackPath) {
       request(["targets", trackPath])
+    } else {
+      error = "Nothing is playing in cliamp"
     }
   }
 
@@ -114,7 +122,7 @@ Column {
         if (!r.ok) return
         ctl.flash("Loading " + item.name + "…")
         page.widget.view = "main"
-      })
+      }, page)
       return
     }
     var removing = item.has === true
@@ -123,20 +131,35 @@ Column {
     var args = removing ? ["remove", item.id, trackPath] : ["add", item.provider, item.id, trackPath]
     ctl.run(args, function(r) {
       page.pendingKey = ""
-      if (!r.ok) return
+      if (!r.ok) {
+        if (r.error === "track changed") page.resnapshot()
+        return
+      }
       page.items = page.items.map(function(i) {
         return i.provider === item.provider && i.id === item.id
           ? Object.assign({}, i, { has: item.provider === "local" ? !removing : true }) : i
       })
       ctl.flash((removing ? "Removed from " : "Added to ") + item.name)
-    })
+    }, page)
   }
 
   function snapshotTrack() {
-    if (trackPath || !page.widget.cliamp || !page.widget.cliamp.path) return
-    trackPath = page.widget.cliamp.path
-    trackTitle = page.widget.title
+    var ctl = page.widget.cliamp
+    if (trackPath || !ctl || !ctl.path) return
+    trackPath = ctl.path
+    trackTitle = ctl.title || page.widget.title
     fetch()
+  }
+
+  // The track moved on under the picker: show the new one instead.
+  function resnapshot() {
+    trackPath = ""
+    trackTitle = ""
+    items = []
+    spotifyLoaded = false
+    offset = 0
+    page.widget.cliamp.flash("Track changed, showing the new one")
+    snapshotTrack()
   }
 
   onBrowsingChanged: {
@@ -144,7 +167,7 @@ Column {
     total = 0
     offset = 0
     if (browsing) {
-      if (!providers.length) providersProc.running = true
+      if (!providers.length && page.widget.browseProvider) providersProc.running = true
       fetch()
     } else {
       snapshotTrack()
@@ -160,7 +183,7 @@ Column {
     }
     keyCatcher.forceActiveFocus()
   }
-  Component.onDestruction: if (page.widget.cliamp) page.widget.cliamp.detach()
+  Component.onDestruction: if (page.widget.cliamp) page.widget.cliamp.detach(page)
 
   Connections {
     target: page.widget
@@ -185,10 +208,17 @@ Column {
       onStreamFinished: if (listProc.requestId === page.requestId && !page.queuedArgs)
         page.received(page.widget.parseReply(text), listProc.kind)
     }
-    onExited: if (page.queuedArgs) {
+    onExited: if (page.queuedArgs) queueTimer.restart()
+  }
+
+  // Starts a queued request; dies with the page, unlike Qt.callLater.
+  Timer {
+    id: queueTimer
+    interval: 0
+    onTriggered: {
       var args = page.queuedArgs
       page.queuedArgs = null
-      Qt.callLater(function() { page.start(args) })
+      if (args) page.start(args)
     }
   }
 
@@ -260,7 +290,11 @@ Column {
         opacity: selected ? 1.0 : 0.7
         horizontalPadding: Style.spacing.controlPaddingX
         verticalPadding: Style.spacing.controlPaddingY
-        onClicked: page.widget.browseProvider = modelData.key
+        onClicked: {
+          if (modelData.key === "spotify") page.spotifyAsked = true
+          if (page.widget.browseProvider === modelData.key) page.fetch()
+          else page.widget.browseProvider = modelData.key
+        }
       }
     }
   }
@@ -317,11 +351,27 @@ Column {
           text: row.pending ? "…"
             : page.browsing ? (row.modelData.count > 0 ? String(row.modelData.count) : "")
             : (row.modelData.has === true ? "󰄬" : (row.modelData.provider === "spotify" ? "Spotify" : "Local"))
-          color: !page.browsing && row.modelData.has === true ? Color.accent : Qt.darker(page.widget.bar.foreground, 1.5)
+          color: !page.browsing && row.modelData.has === true ? Color.accent : Color.muted
           font.family: page.itemFont
           font.pixelSize: !page.browsing && row.modelData.has === true ? Style.font.body : Style.font.caption
         }
       }
+    }
+  }
+
+  Button {
+    visible: page.spotifyWaiting
+    anchors.horizontalCenter: parent.horizontalCenter
+    iconText: "󰓇"
+    text: "Load Spotify playlists"
+    tooltipText: "The first load after cliamp starts can take a while; cliamp pauses meanwhile"
+    fontSize: Style.font.bodySmall
+    foreground: page.widget.bar.foreground
+    horizontalPadding: Style.spacing.controlPaddingX
+    verticalPadding: Style.spacing.controlPaddingY
+    onClicked: {
+      page.spotifyAsked = true
+      page.fetch()
     }
   }
 
@@ -348,7 +398,7 @@ Column {
           ? "Loading from Spotify… the first time can take a few seconds and cliamp pauses meanwhile."
           : "Loading…")
       : (page.widget.cliamp && page.widget.cliamp.message ? page.widget.cliamp.message : page.error)
-    color: Qt.darker(page.widget.bar.foreground, 1.4)
+    color: Color.muted
     font.family: page.itemFont
     font.pixelSize: Style.font.caption
   }
@@ -373,7 +423,7 @@ Column {
       anchors.verticalCenter: parent.verticalCenter
       textFormat: Text.PlainText
       text: (page.offset + 1) + "–" + Math.min(page.count, page.offset + page.pageSize) + " of " + page.count
-      color: Qt.darker(page.widget.bar.foreground, 1.3)
+      color: Color.muted
       font.family: page.itemFont
       font.pixelSize: Style.font.caption
     }

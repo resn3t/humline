@@ -108,7 +108,7 @@ omarchy-shell humline addToPlaylist
 
 - Resource use: nothing extra runs while nothing is playing. cava runs
   while audio plays, and the cliamp parts only load while the card is open.
-  Every cliamp action is one short-lived call.
+  Each click runs one short-lived helper process.
 - Like every Omarchy plugin, Humline runs unsandboxed inside your shell.
   Read the code before installing; it's short.
 - Privacy: the only network request Humline makes itself is a Spotify oEmbed
