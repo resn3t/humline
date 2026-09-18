@@ -9,36 +9,19 @@ BarWidget {
   id: root
   moduleName: "humline"
 
-  // Players with something to show; playerctld only mirrors other players.
-  readonly property var sourcePlayers: {
-    var all = Mpris.players ? Mpris.players.values : []
-    var result = []
-    for (var i = 0; i < all.length; i++) {
-      var p = all[i]
-      if (!p || String(p.dbusName || "").indexOf("playerctld") !== -1) continue
-      if (p.trackTitle || p.trackArtist) result.push(p)
-    }
-    return result
-  }
-  property string selectedKey: ""
-  // A player picked in the card wins; otherwise the first one playing.
-  readonly property var activePlayer: {
-    var players = sourcePlayers
-    var firstPlaying = null
-    for (var i = 0; i < players.length; i++) {
-      if (playerKey(players[i]) === selectedKey) return players[i]
-      if (!firstPlaying && players[i].isPlaying) firstPlaying = players[i]
-    }
-    return firstPlaying || (players.length ? players[0] : null)
-  }
-  property bool cavaMissing: false
+  // Player choice and the single cava live in Service.qml, shared by every
+  // bar (one per monitor).
+  readonly property var service: bar && bar.shell ? bar.shell.serviceFor("humline") : null
+  readonly property var sourcePlayers: service ? service.sourcePlayers : []
+  readonly property var activePlayer: service ? service.activePlayer : null
+  readonly property bool cavaMissing: service ? service.cavaMissing : false
 
   // Tunable from the manifest schema (shell.json entry).
   readonly property bool hideWhenPaused: setting("hideWhenPaused", false) === true
   readonly property int dotCount: Math.max(4, Math.min(10, Math.round(Number(setting("dotCount", 10)) || 10)))
 
   function playerKey(player) { return player ? String(player.dbusName || "") : "" }
-  function selectPlayer(player) { selectedKey = playerKey(player) }
+  function selectPlayer(player) { if (service) service.selectPlayer(player) }
   function localPath(name) { return decodeURIComponent(String(Qt.resolvedUrl(name)).replace(/^file:\/\//, "")) }
 
   readonly property bool hasMedia: activePlayer !== null && (activePlayer.trackTitle || activePlayer.trackArtist)
@@ -49,7 +32,7 @@ BarWidget {
 
   readonly property bool playing: hasMedia && activePlayer.isPlaying
   readonly property bool canSetVolume: !!activePlayer && activePlayer.volumeSupported === true
-  property var bands: []
+  readonly property var bands: service ? service.bands : []
   // The bar face shows dotCount bands sampled evenly from cava's ten.
   readonly property var barBands: {
     if (dotCount >= bands.length) return bands
@@ -208,33 +191,10 @@ BarWidget {
     if (canSetVolume) activePlayer.volume = Math.max(0, Math.min(1, v))
   }
 
-  onPlayingChanged: if (!playing) bands = []
-
   readonly property bool shown: hasMedia && (playing || popupOpen || !hideWhenPaused)
   visible: shown
   implicitWidth: shown ? (playing ? barSpectrum.implicitWidth : glyph.implicitWidth) + Style.space(12) : 0
   implicitHeight: barSize
-
-  // cava analyses the actual PipeWire output, so the spectrum works for any player.
-    Process {
-    id: visStream
-    command: ["sh", "-c", "command -v cava >/dev/null || exit 127; exec cava -p \"$1\"", "sh", root.localPath("cava.conf")]
-    running: root.playing && !root.cavaMissing
-    stdout: SplitParser {
-      onRead: function(line) {
-        var parts = line.split(";")
-        var values = []
-        for (var i = 0; i < parts.length; i++) {
-          if (parts[i] !== "") values.push(Number(parts[i]) / 100)
-        }
-        if (values.length) root.bands = values
-      }
-    }
-    onExited: function(exitCode) {
-      if (exitCode === 127) root.cavaMissing = true
-      else if (root.playing) visRestart.restart()
-    }
-  }
 
   Process { id: focusProc }
   // Fire-and-forget cliamp action from IPC while the card is closed.
@@ -294,12 +254,6 @@ BarWidget {
       root.activePlayer.positionChanged()
       root.seekTo(root.activePlayer.position + offsetSeconds)
     }
-  }
-
-  Timer {
-    id: visRestart
-    interval: 1500
-    onTriggered: if (root.playing && !root.cavaMissing && !visStream.running) visStream.running = true
   }
 
   DotSpectrum {

@@ -35,7 +35,7 @@ The bar face is just this: ![the bar widget](docs/bar.png)
 - **Card:** cover art, title/artist/album, larger spectrum, seek bar,
   previous/play/next, shuffle/repeat (if the player supports them), volume.
 - **Several players at once:** each gets its own row with play/pause and
-  jump; click a row to make it the main one.
+  jump; click a row to make it the main one (it stays main while it plays; when it stops, whichever player is playing takes over).
 - **cliamp extras** (only while cliamp is the active player):
   - **Heart:** like/unlike the track in cliamp's Favorites (same as `n` in
     cliamp).
@@ -123,29 +123,31 @@ omarchy-shell humline addToPlaylist
 
 ## Footprint
 
-Measured on my machine (Omarchy 4.0, Hyprland 0.56, one monitor, cliamp
-playing). These are my numbers, not a benchmark against other plugins.
+Measured on my machine (Omarchy 4.0, Hyprland 0.56, cliamp playing the same
+radio stream, 20 s samples, card closed). These are my numbers, one run each,
+not a benchmark. `tools/footprint.sh "<label>" [seconds]` reads `/proc` and
+changes nothing, so you can repeat it.
 
-| State | Result |
-| --- | --- |
-| Paused | no `cava` and no Humline process running |
-| Playing | one `cava` process |
-| Card open | omarchy-shell memory about +8 to +10 MB, released on close |
-| Ten open/close cycles | shell memory unchanged (361 MB before, 357 MB after) |
-
-Each click on a cliamp action runs one short-lived helper process.
-
-Measure it yourself with `tools/footprint.sh "<label>" [seconds]` (reads
-`/proc`, changes nothing). One row per state, same track, card closed. v1.2.0
-on my machine, 20 s samples, one test tone via mpv:
-
-| State | Shell RSS | CPU (shell + children) | Child processes |
+| Bar setup | Shell RSS | CPU (shell + children) | Extra processes |
 | --- | --- | --- | --- |
-| Paused | 347 MB | 0.9 % | none from Humline (`inotifywait`, `wl-paste` are the shell's) |
-| Playing | 347 MB | 6.3 % | + one `cava` |
+| No media widget | 341 MB | 0.8 % | none |
+| Built-in `omarchy.media` | 342 MB | 0.9 % | none |
+| Humline 1.3, **playing** | 350 MB | 8.5 % | one `cava` |
+| Humline, **paused** (1.2.0) | 347 MB | 0.9 % | none |
 
-CPU while playing is mostly the shell redrawing the spectrum plus `cava`
-itself.
+So while paused Humline costs nothing measurable, the same as the built-in
+widget. While playing, the live spectrum is not free: about 5-8 % of one core
+here (`cava` plus the shell redrawing ten dot columns). If that matters, set
+**Spectrum dots** lower or use **Hide when paused**; a widget without a
+spectrum is lighter. I did not measure other third-party widgets.
+
+Other facts:
+
+- The card adds about 8-10 MB of shell memory while open and gives it back on
+  close (ten open/close cycles: 361 MB before, 357 MB after).
+- With two monitors, 1.1.1 ran two `cava` processes; 1.3 runs one, shared by
+  every bar (tested with a second virtual monitor).
+- Each click on a cliamp action runs one short-lived helper process.
 
 ## Known limits
 
@@ -167,8 +169,10 @@ itself.
   the track URL. If several browser windows are open and none matches,
   Humline does not jump (it never guesses). Web apps (their own window) work
   best; in a normal browser it may not select the playing tab.
-- With several monitors, each bar runs its own `cava` while audio plays (not
-  measured).
+- The spectrum comes from the whole PipeWire output (`cava`), not from one
+  player: if another app makes sound while the active player plays, its audio
+  moves the dots too. Per-player capture would need extra processes, which
+  Humline avoids.
 
 ## Notes
 

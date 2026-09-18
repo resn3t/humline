@@ -15,10 +15,10 @@ to earn its bytes: Humline stays small and needs no new runtime dependencies.
 
 ## 2.0 must-have
 
-- Footprint script done in 1.2.0; still to do: a
-  fair side-by-side with the built-in `omarchy.media` widget.
+- ~~Footprint script and a side-by-side with the built-in widget~~ done in
+  1.2.0 / 1.3.0 (see the README table); other third-party widgets not measured.
 - ~~Keyboard use of the card~~ done in 1.2.0 (Omarchy's `KeyboardPanel`).
-- Verify one `cava` per monitor and remove duplicates on multi-monitor setups.
+- ~~One `cava` per monitor~~ done in 1.3.0: one shared cava (tested on two monitors).
 - Listing in the Omarchy plugin marketplace, tagged releases with notes.
 - Decide the plugin id policy (`humline` today; a namespaced id would break
   existing installs and bar placement).
@@ -29,6 +29,10 @@ to earn its bytes: Humline stays small and needs no new runtime dependencies.
   width.
 - ~~Tiny settings: hide when paused, dot count~~ done in 1.2.0.
 - Ignore noise players (notification sounds, games).
+- Use `cliamp visstream` for cliamp so cava becomes optional there: on cliamp
+  2.2.0 it only returned zero bands while playing, so it was dropped for now.
+- Gate the spectrum on a matching PipeWire stream: cava reads the whole
+  output, so this cannot make dots per-player and risks blanking them.
 - Refresh cliamp's heart marker live if cliamp gains a remote favorites
   command.
 - Vertical bar support.
