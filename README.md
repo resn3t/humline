@@ -18,6 +18,10 @@ jump-to-player on click.
   cursor stays where it was.
 - **Multiple sources:** every active player is listed with its own
   play/pause and jump buttons. Click a row to make it the main one.
+- **Shuffle/repeat** toggles for players that support them.
+- **cliamp extras** when [cliamp](https://github.com/bjarneo/cliamp) is the
+  active player: like button, add to playlist, and a source browser (see
+  below).
 - **Cover fallback:** if a player reports a `spotify:track:` URI but no
   cover, the thumbnail is fetched from the public Spotify oEmbed endpoint.
 - Uses your Omarchy theme colors and the shell's own controls.
@@ -34,6 +38,7 @@ shell (Waybar-era) are **not** supported.
 | `cava` | the spectrum (without it you get a static icon) |
 | `jq`, `busctl` (systemd), `hyprctl` | jump to player |
 | `herdr` (optional) | jumping to a herdr tab |
+| `cliamp` 2.x, `jq`, `flock` (optional) | the cliamp extras |
 
 ## Install
 
@@ -70,7 +75,30 @@ IPC for scripts and keybindings:
 omarchy-shell nowpip togglePopup
 omarchy-shell nowpip focusPlayer
 omarchy-shell nowpip seek 10     # or: seek -10
+# cliamp only:
+omarchy-shell nowpip toggleFavorite
+omarchy-shell nowpip browse
+omarchy-shell nowpip browseSource radio   # or local, spotify, …
+omarchy-shell nowpip addToPlaylist
 ```
+
+## cliamp integration
+
+When cliamp is the active player the card gets a small extra row, and
+shuffle/repeat go through cliamp (it doesn't expose them over MPRIS):
+
+- **Heart:** adds/removes the track in cliamp's Favorites. cliamp has no
+  remote command for this, so nowpip writes `favorites.toml` itself, in
+  cliamp's own format and under its lock file (`favorites.toml.lock`).
+- **Add to playlist:** your local cliamp playlists (with a check mark if the
+  track is already in one; click again to remove it) and your own Spotify
+  playlists. cliamp can only *add* to Spotify playlists, not remove.
+- **Browse:** one tab per configured provider (`provider.list`), 20 items
+  per page; click a playlist or station to load and play it in cliamp.
+
+Everything cliamp-specific only exists while the card is open: no polling,
+no event stream, just one short `cliamp remote call` per click (via
+`bin/nowpip-cliamp`). Other players keep the plain MPRIS card.
 
 ## Notes
 
@@ -80,13 +108,14 @@ omarchy-shell nowpip seek 10     # or: seek -10
   to the playing tab. Web apps (their own window) are fine.
 - Like every Omarchy plugin, nowpip runs unsandboxed inside your shell.
   Read the code before installing; it's short.
-- Privacy: the only network request is the optional Spotify oEmbed cover
-  lookup described above.
+- Privacy: the only network request nowpip makes itself is the optional
+  Spotify oEmbed cover lookup described above (cliamp's own requests are
+  cliamp's).
 
 ## Legal
 
 Free to use, modify and share under the [MIT License](LICENSE). The popup
 layout is adapted from Omarchy's built-in media widget (MIT, © David
 Heinemeier Hansson). All product names and trademarks (Omarchy, Spotify,
-herdr, cava and others) belong to their respective owners. They are named
+herdr, cava, cliamp and others) belong to their respective owners. They are named
 here only to describe compatibility. Provided "as is", without warranty.

@@ -59,6 +59,49 @@ BarWidget {
 
   property bool popupOpen: false
 
+  // cliamp extras. Everything cliamp-specific lives in Loaders that only
+  // exist while the card is open on a cliamp track; nothing runs otherwise.
+  readonly property bool isCliamp: !!activePlayer
+    && (playerKey(activePlayer) === "org.mpris.MediaPlayer2.cliamp" || activePlayer.identity === "Cliamp")
+  // Stays true during the card's fade-out so it doesn't reflow while closing.
+  readonly property bool cliampOpen: (popupOpen || popup.visible) && isCliamp
+  // "main", "browse" (provider browser) or "lists" (add to playlist).
+  property string view: "main"
+  property string browseProvider: ""
+  readonly property var cliamp: cliampLoader.item
+  // cliamp's own track path; MPRIS xesam:url until the first state reply.
+  readonly property string cliampPath: cliamp && cliamp.path ? cliamp.path : trackUrl
+  readonly property string cliampHelper: localPath("bin/nowpip-cliamp")
+
+  onIsCliampChanged: if (!isCliamp) view = "main"
+
+  // Generic MPRIS shuffle/loop for players that support them; cliamp does
+  // not expose these over MPRIS, so it goes through its own IPC instead.
+  readonly property bool canShuffle: isCliamp ? !!cliamp : (!!activePlayer && activePlayer.shuffleSupported === true)
+  readonly property bool canLoop: isCliamp ? !!cliamp : (!!activePlayer && activePlayer.loopSupported === true)
+  readonly property bool shuffleOn: isCliamp ? (!!cliamp && cliamp.shuffle) : (!!activePlayer && activePlayer.shuffle === true)
+  // "Off", "All" or "One".
+  readonly property string loopMode: isCliamp ? (cliamp ? cliamp.repeat : "Off")
+    : (!activePlayer ? "Off" : activePlayer.loopState === MprisLoopState.Track ? "One"
+      : activePlayer.loopState === MprisLoopState.Playlist ? "All" : "Off")
+
+  function toggleShuffle() {
+    if (isCliamp) { if (cliamp) cliamp.run(["shuffle"]) }
+    else if (canShuffle) activePlayer.shuffle = !activePlayer.shuffle
+  }
+
+  function cycleLoop() {
+    if (isCliamp) { if (cliamp) cliamp.run(["repeat"]) }
+    else if (canLoop) activePlayer.loopState = loopMode === "Off" ? MprisLoopState.Playlist
+      : (loopMode === "All" ? MprisLoopState.Track : MprisLoopState.None)
+  }
+
+  function openView(name) {
+    if (!isCliamp) return
+    view = name
+    popupOpen = true
+  }
+
   // Some players publish a Spotify track URI but no cover; ask Spotify's
   // public oEmbed endpoint for the track thumbnail instead.
   onSpotifyTrackIdChanged: fetchSpotifyArt()
@@ -149,12 +192,44 @@ BarWidget {
   }
 
   Process { id: focusProc }
+  // Fire-and-forget cliamp action from IPC while the card is closed.
+  Process { id: cliampIpcProc }
+
+  // The cliamp files are only compiled and instantiated on demand;
+  // clearing `source` destroys them again.
+  function loadOnDemand(loader, wanted, file) {
+    if (wanted) loader.setSource(Qt.resolvedUrl(file), { widget: root })
+    else loader.source = ""
+  }
+
+  Loader {
+    id: cliampLoader
+    readonly property bool wanted: root.cliampOpen
+    onWantedChanged: root.loadOnDemand(cliampLoader, wanted, "CliampController.qml")
+  }
 
   IpcHandler {
     target: "nowpip"
 
     function togglePopup(): void { root.popupOpen = root.hasMedia && !root.popupOpen }
     function focusPlayer(): void { root.focusPlayer(root.activePlayer) }
+    // cliamp only: like/unlike the current track (cliamp favorites).
+    function toggleFavorite(): void {
+      if (!root.isCliamp) return
+      if (root.cliamp) root.cliamp.toggleFavorite()
+      else if (!cliampIpcProc.running) {
+        cliampIpcProc.command = ["bash", root.cliampHelper, "fav", ""]
+        cliampIpcProc.running = true
+      }
+    }
+    // cliamp only: open the card on the source browser / playlist picker.
+    function browse(): void { root.openView("browse") }
+    // cliamp only: open the browser on a provider key (radio, local, spotify…).
+    function browseSource(provider: string): void {
+      root.browseProvider = provider
+      root.openView("browse")
+    }
+    function addToPlaylist(): void { root.openView("lists") }
     function seek(offsetSeconds: real): void {
       if (!root.activePlayer) return
       root.activePlayer.positionChanged()
@@ -229,337 +304,436 @@ BarWidget {
     bar: root.bar
     owner: root
     open: root.popupOpen
+    onVisibleChanged: if (!visible) root.view = "main"
     contentWidth: popup.fittedContentWidth(Style.space(320))
     contentHeight: popup.fittedContentHeight(column.implicitHeight)
 
     Column {
       id: column
       anchors.fill: parent
-      spacing: Style.space(10)
 
-      Row {
-        spacing: Style.space(10)
+      // cliamp browser / playlist picker replaces the card body while shown.
+      Loader {
+        id: pageLoader
+        readonly property bool wanted: root.cliampOpen && root.view !== "main"
         width: parent.width
+        visible: item !== null
+        onWantedChanged: root.loadOnDemand(pageLoader, wanted, "CliampPage.qml")
+      }
 
-        BorderSurface {
-          width: Style.space(64)
-          height: Style.space(64)
-          radius: Style.spacing.labelGap
-          color: Style.normalFillFor(root.bar.foreground, Color.accent)
-          borderSpec: Border.controlSpec("normal", root.bar.foreground, Color.accent)
+      Column {
+        id: mainView
+        width: parent.width
+        visible: pageLoader.item === null
+        spacing: Style.space(10)
 
-          Image {
-            anchors.fill: parent
-            anchors.margins: Style.space(2)
-            fillMode: Image.PreserveAspectCrop
-            asynchronous: true
-            source: root.artUrl
-            visible: source !== ""
+        Row {
+          spacing: Style.space(10)
+          width: parent.width
+
+          BorderSurface {
+            width: Style.space(64)
+            height: Style.space(64)
+            radius: Style.spacing.labelGap
+            color: Style.normalFillFor(root.bar.foreground, Color.accent)
+            borderSpec: Border.controlSpec("normal", root.bar.foreground, Color.accent)
+
+            Image {
+              anchors.fill: parent
+              anchors.margins: Style.space(2)
+              fillMode: Image.PreserveAspectCrop
+              asynchronous: true
+              source: root.artUrl
+              visible: source !== ""
+            }
+
+            Text {
+              anchors.centerIn: parent
+              visible: root.artUrl === ""
+              text: "󰝚"
+              color: root.bar.foreground
+              font.family: root.bar.fontFamily
+              font.pixelSize: Style.font.displayLarge
+            }
+
+            MouseArea {
+              anchors.fill: parent
+              cursorShape: Qt.PointingHandCursor
+              onClicked: root.focusPlayer(root.activePlayer)
+            }
           }
 
-          Text {
-            anchors.centerIn: parent
-            visible: root.artUrl === ""
-            text: "󰝚"
-            color: root.bar.foreground
-            font.family: root.bar.fontFamily
-            font.pixelSize: Style.font.displayLarge
+          Column {
+            spacing: Style.space(4)
+            width: parent.width - Style.space(64) - headerFocusButton.width - parent.spacing * 2
+
+            Text {
+              textFormat: Text.PlainText
+              text: root.title || "Nothing playing"
+              color: root.bar.foreground
+              font.family: root.bar.fontFamily
+              font.pixelSize: Style.font.subtitle
+              font.bold: true
+              elide: Text.ElideRight
+              width: parent.width
+            }
+
+            Text {
+              textFormat: Text.PlainText
+              text: root.artist
+              color: Qt.darker(root.bar.foreground, 1.3)
+              font.family: root.bar.fontFamily
+              font.pixelSize: Style.font.bodySmall
+              elide: Text.ElideRight
+              width: parent.width
+              visible: text !== ""
+            }
+
+            Text {
+              textFormat: Text.PlainText
+              text: root.activePlayer && root.activePlayer.trackAlbum ? root.activePlayer.trackAlbum : ""
+              color: Qt.darker(root.bar.foreground, 1.6)
+              font.family: root.bar.fontFamily
+              font.pixelSize: Style.font.caption
+              elide: Text.ElideRight
+              width: parent.width
+              visible: text !== ""
+            }
           }
 
-          MouseArea {
-            anchors.fill: parent
-            cursorShape: Qt.PointingHandCursor
+          Button {
+            id: headerFocusButton
+            iconText: "󰁔"
+            foreground: root.bar.foreground
+            horizontalPadding: Style.spacing.controlPaddingY
+            verticalPadding: Style.spacing.controlPaddingY
+            tooltipText: "Go to " + (root.activePlayer && root.activePlayer.identity ? root.activePlayer.identity : "player")
             onClicked: root.focusPlayer(root.activePlayer)
           }
         }
 
-        Column {
-          spacing: Style.space(4)
-          width: parent.width - Style.space(64) - headerFocusButton.width - parent.spacing * 2
+        DotSpectrum {
+          visible: root.playing
+          anchors.horizontalCenter: parent.horizontalCenter
+          bands: root.bands
+          rows: 10
+          gap: Style.space(2)
+          dotWidth: Math.floor((parent.width - gap * 9) / 10)
+          dotHeight: Style.space(3)
+          litColor: Color.accent
+          peakColor: root.bar.foreground
+          dimColor: Qt.rgba(root.bar.foreground.r, root.bar.foreground.g, root.bar.foreground.b, 0.08)
+        }
+
+        Row {
+          id: progressRow
+          visible: root.hasLength
+          width: parent.width
+          spacing: Style.space(8)
+
+          readonly property real position: root.activePlayer ? root.activePlayer.position : 0
+          readonly property real length: root.activePlayer ? root.activePlayer.length : 0
 
           Text {
+            id: elapsedLabel
             textFormat: Text.PlainText
-            text: root.title || "Nothing playing"
-            color: root.bar.foreground
-            font.family: root.bar.fontFamily
-            font.pixelSize: Style.font.subtitle
-            font.bold: true
-            elide: Text.ElideRight
-            width: parent.width
-          }
-
-          Text {
-            textFormat: Text.PlainText
-            text: root.artist
+            anchors.verticalCenter: parent.verticalCenter
+            text: root.formatTime(progressSlider.dragging ? progressSlider.liveValue : progressRow.position)
             color: Qt.darker(root.bar.foreground, 1.3)
             font.family: root.bar.fontFamily
-            font.pixelSize: Style.font.bodySmall
-            elide: Text.ElideRight
-            width: parent.width
-            visible: text !== ""
+            font.pixelSize: Style.font.caption
+            width: Style.space(40)
+          }
+
+          PanelSlider {
+            id: progressSlider
+            bar: root.bar
+            anchors.verticalCenter: parent.verticalCenter
+            width: parent.width - elapsedLabel.width - totalLabel.width - parent.spacing * 2
+            minimum: 0
+            maximum: Math.max(1, progressRow.length)
+            step: 10
+            value: progressRow.position
+            enabled: root.canSeek
+            onReleased: function(v) { root.seekTo(v) }
           }
 
           Text {
+            id: totalLabel
             textFormat: Text.PlainText
-            text: root.activePlayer && root.activePlayer.trackAlbum ? root.activePlayer.trackAlbum : ""
-            color: Qt.darker(root.bar.foreground, 1.6)
+            anchors.verticalCenter: parent.verticalCenter
+            text: root.formatTime(progressRow.length)
+            color: Qt.darker(root.bar.foreground, 1.3)
             font.family: root.bar.fontFamily
             font.pixelSize: Style.font.caption
-            elide: Text.ElideRight
-            width: parent.width
-            visible: text !== ""
+            width: Style.space(40)
+            horizontalAlignment: Text.AlignRight
           }
         }
 
-        Button {
-          id: headerFocusButton
-          iconText: "󰁔"
-          foreground: root.bar.foreground
-          horizontalPadding: Style.spacing.controlPaddingY
-          verticalPadding: Style.spacing.controlPaddingY
-          tooltipText: "Go to " + (root.activePlayer && root.activePlayer.identity ? root.activePlayer.identity : "player")
-          onClicked: root.focusPlayer(root.activePlayer)
+        Row {
+          anchors.horizontalCenter: parent.horizontalCenter
+          spacing: Style.space(6)
+
+          Button {
+            visible: root.canShuffle
+            anchors.verticalCenter: parent.verticalCenter
+            iconText: root.shuffleOn ? "󰒝" : "󰒞"
+            foreground: root.bar.foreground
+            active: root.shuffleOn
+            opacity: root.shuffleOn ? 1.0 : 0.55
+            horizontalPadding: Style.spacing.controlPaddingY
+            verticalPadding: Style.spacing.controlPaddingY
+            tooltipText: root.shuffleOn ? "Shuffle on" : "Shuffle off"
+            onClicked: root.toggleShuffle()
+          }
+
+          Button {
+            iconText: "󰒮"
+            foreground: root.bar.foreground
+            horizontalPadding: Style.spacing.controlPaddingX
+            verticalPadding: Style.spacing.controlPaddingY
+            enabled: root.activePlayer && root.activePlayer.canGoPrevious
+            opacity: enabled ? 1.0 : 0.4
+            onClicked: if (root.activePlayer) root.activePlayer.previous()
+          }
+
+          Button {
+            iconText: root.activePlayer && root.activePlayer.isPlaying ? "󰏤" : "󰐊"
+            foreground: root.bar.foreground
+            horizontalPadding: Style.spacing.panelGap
+            verticalPadding: Style.spacing.controlPaddingY
+            iconSize: Style.font.iconLarge
+            enabled: root.activePlayer && (root.activePlayer.canTogglePlaying || root.activePlayer.canPlay || root.activePlayer.canPause)
+            opacity: enabled ? 1.0 : 0.4
+            onClicked: if (root.activePlayer) root.activePlayer.togglePlaying()
+          }
+
+          Button {
+            iconText: "󰒭"
+            foreground: root.bar.foreground
+            horizontalPadding: Style.spacing.controlPaddingX
+            verticalPadding: Style.spacing.controlPaddingY
+            enabled: root.activePlayer && root.activePlayer.canGoNext
+            opacity: enabled ? 1.0 : 0.4
+            onClicked: if (root.activePlayer) root.activePlayer.next()
+          }
+
+          Button {
+            visible: root.canLoop
+            anchors.verticalCenter: parent.verticalCenter
+            iconText: root.loopMode === "One" ? "󰑘" : (root.loopMode === "All" ? "󰑖" : "󰑗")
+            foreground: root.bar.foreground
+            active: root.loopMode !== "Off"
+            opacity: root.loopMode !== "Off" ? 1.0 : 0.55
+            horizontalPadding: Style.spacing.controlPaddingY
+            verticalPadding: Style.spacing.controlPaddingY
+            tooltipText: "Repeat: " + root.loopMode.toLowerCase()
+            onClicked: root.cycleLoop()
+          }
         }
-      }
 
-      DotSpectrum {
-        visible: root.playing
-        anchors.horizontalCenter: parent.horizontalCenter
-        bands: root.bands
-        rows: 10
-        gap: Style.space(2)
-        dotWidth: Math.floor((parent.width - gap * 9) / 10)
-        dotHeight: Style.space(3)
-        litColor: Color.accent
-        peakColor: root.bar.foreground
-        dimColor: Qt.rgba(root.bar.foreground.r, root.bar.foreground.g, root.bar.foreground.b, 0.08)
-      }
+        // cliamp: like, add to playlist, browse sources.
+        Row {
+          visible: !!root.cliamp
+          anchors.horizontalCenter: parent.horizontalCenter
+          spacing: Style.space(6)
 
-      Row {
-        id: progressRow
-        visible: root.hasLength
-        width: parent.width
-        spacing: Style.space(8)
+          Button {
+            iconText: root.cliamp && root.cliamp.fav ? "󰋑" : "󰋕"
+            foreground: root.cliamp && root.cliamp.fav ? Color.accent : root.bar.foreground
+            horizontalPadding: Style.spacing.controlPaddingX
+            verticalPadding: Style.spacing.controlPaddingY
+            enabled: !!root.cliamp && root.cliamp.path !== ""
+            tooltipText: root.cliamp && root.cliamp.fav ? "Remove from cliamp favorites" : "Add to cliamp favorites"
+            onClicked: root.cliamp.toggleFavorite()
+          }
 
-        readonly property real position: root.activePlayer ? root.activePlayer.position : 0
-        readonly property real length: root.activePlayer ? root.activePlayer.length : 0
+          Button {
+            iconText: "󰐒"
+            foreground: root.bar.foreground
+            horizontalPadding: Style.spacing.controlPaddingX
+            verticalPadding: Style.spacing.controlPaddingY
+            enabled: !!root.cliamp && root.cliamp.path !== ""
+            tooltipText: "Add to playlist"
+            onClicked: root.view = "lists"
+          }
+
+          Button {
+            iconText: "󰌱"
+            foreground: root.bar.foreground
+            horizontalPadding: Style.spacing.controlPaddingX
+            verticalPadding: Style.spacing.controlPaddingY
+            tooltipText: "Browse cliamp sources"
+            onClicked: root.view = "browse"
+          }
+        }
 
         Text {
-          id: elapsedLabel
-          textFormat: Text.PlainText
-          anchors.verticalCenter: parent.verticalCenter
-          text: root.formatTime(progressSlider.dragging ? progressSlider.liveValue : progressRow.position)
-          color: Qt.darker(root.bar.foreground, 1.3)
-          font.family: root.bar.fontFamily
-          font.pixelSize: Style.font.caption
-          width: Style.space(40)
-        }
-
-        PanelSlider {
-          id: progressSlider
-          bar: root.bar
-          anchors.verticalCenter: parent.verticalCenter
-          width: parent.width - elapsedLabel.width - totalLabel.width - parent.spacing * 2
-          minimum: 0
-          maximum: Math.max(1, progressRow.length)
-          step: 10
-          value: progressRow.position
-          enabled: root.canSeek
-          onReleased: function(v) { root.seekTo(v) }
-        }
-
-        Text {
-          id: totalLabel
-          textFormat: Text.PlainText
-          anchors.verticalCenter: parent.verticalCenter
-          text: root.formatTime(progressRow.length)
-          color: Qt.darker(root.bar.foreground, 1.3)
-          font.family: root.bar.fontFamily
-          font.pixelSize: Style.font.caption
-          width: Style.space(40)
-          horizontalAlignment: Text.AlignRight
-        }
-      }
-
-      Row {
-        anchors.horizontalCenter: parent.horizontalCenter
-        spacing: Style.space(6)
-
-        Button {
-          iconText: "󰒮"
-          foreground: root.bar.foreground
-          horizontalPadding: Style.spacing.controlPaddingX
-          verticalPadding: Style.spacing.controlPaddingY
-          enabled: root.activePlayer && root.activePlayer.canGoPrevious
-          opacity: enabled ? 1.0 : 0.4
-          onClicked: if (root.activePlayer) root.activePlayer.previous()
-        }
-
-        Button {
-          iconText: root.activePlayer && root.activePlayer.isPlaying ? "󰏤" : "󰐊"
-          foreground: root.bar.foreground
-          horizontalPadding: Style.spacing.panelGap
-          verticalPadding: Style.spacing.controlPaddingY
-          iconSize: Style.font.iconLarge
-          enabled: root.activePlayer && (root.activePlayer.canTogglePlaying || root.activePlayer.canPlay || root.activePlayer.canPause)
-          opacity: enabled ? 1.0 : 0.4
-          onClicked: if (root.activePlayer) root.activePlayer.togglePlaying()
-        }
-
-        Button {
-          iconText: "󰒭"
-          foreground: root.bar.foreground
-          horizontalPadding: Style.spacing.controlPaddingX
-          verticalPadding: Style.spacing.controlPaddingY
-          enabled: root.activePlayer && root.activePlayer.canGoNext
-          opacity: enabled ? 1.0 : 0.4
-          onClicked: if (root.activePlayer) root.activePlayer.next()
-        }
-      }
-
-      Row {
-        id: volumeRow
-        visible: root.canSetVolume
-        width: parent.width
-        spacing: Style.space(8)
-
-        readonly property real volume: root.activePlayer ? root.activePlayer.volume : 0
-
-        Text {
-          id: volumeIcon
-          textFormat: Text.PlainText
-          anchors.verticalCenter: parent.verticalCenter
-          text: volumeRow.volume <= 0.001 ? "󰝟" : (volumeRow.volume < 0.34 ? "󰕿" : (volumeRow.volume < 0.67 ? "󰖀" : "󰕾"))
-          color: root.bar.foreground
-          font.family: root.bar.fontFamily
-          font.pixelSize: Style.font.body
-          width: Style.space(18)
+          visible: !!root.cliamp && root.cliamp.message !== ""
+          width: parent.width
           horizontalAlignment: Text.AlignHCenter
-        }
-
-        PanelSlider {
-          bar: root.bar
-          anchors.verticalCenter: parent.verticalCenter
-          width: parent.width - volumeIcon.width - volumeLabel.width - parent.spacing * 2
-          minimum: 0
-          maximum: 1
-          step: 0.05
-          value: volumeRow.volume
-          onMoved: function(v) { root.setVolume(v) }
-        }
-
-        Text {
-          id: volumeLabel
           textFormat: Text.PlainText
-          anchors.verticalCenter: parent.verticalCenter
-          text: Math.round(volumeRow.volume * 100) + "%"
-          color: Qt.darker(root.bar.foreground, 1.3)
+          text: root.cliamp ? root.cliamp.message : ""
+          color: Qt.darker(root.bar.foreground, 1.4)
           font.family: root.bar.fontFamily
           font.pixelSize: Style.font.caption
-          width: Style.space(34)
-          horizontalAlignment: Text.AlignRight
+          elide: Text.ElideRight
         }
-      }
 
-      PanelSeparator {
-        visible: root.sourcePlayers.length > 1
-        foreground: root.bar.foreground
-      }
+        Row {
+          id: volumeRow
+          visible: root.canSetVolume
+          width: parent.width
+          spacing: Style.space(8)
 
-      Column {
-        id: sourceList
-        visible: root.sourcePlayers.length > 1
-        width: parent.width
-        spacing: Style.space(4)
+          readonly property real volume: root.activePlayer ? root.activePlayer.volume : 0
 
-        Repeater {
-          model: root.sourcePlayers
+          Text {
+            id: volumeIcon
+            textFormat: Text.PlainText
+            anchors.verticalCenter: parent.verticalCenter
+            text: volumeRow.volume <= 0.001 ? "󰝟" : (volumeRow.volume < 0.34 ? "󰕿" : (volumeRow.volume < 0.67 ? "󰖀" : "󰕾"))
+            color: root.bar.foreground
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.body
+            width: Style.space(18)
+            horizontalAlignment: Text.AlignHCenter
+          }
 
-          BorderSurface {
-            id: sourceRow
-            required property var modelData
+          PanelSlider {
+            bar: root.bar
+            anchors.verticalCenter: parent.verticalCenter
+            width: parent.width - volumeIcon.width - volumeLabel.width - parent.spacing * 2
+            minimum: 0
+            maximum: 1
+            step: 0.05
+            value: volumeRow.volume
+            onMoved: function(v) { root.setVolume(v) }
+          }
 
-            readonly property var player: modelData
-            readonly property bool selected: root.activePlayer && player
-              && root.playerKey(root.activePlayer) === root.playerKey(player)
-            readonly property string sourceTitle: player ? (player.trackTitle || player.identity || player.desktopEntry || "Media source") : "Media source"
-            readonly property string sourceDetail: player && player.trackArtist ? player.trackArtist : (player && player.identity ? player.identity : "")
+          Text {
+            id: volumeLabel
+            textFormat: Text.PlainText
+            anchors.verticalCenter: parent.verticalCenter
+            text: Math.round(volumeRow.volume * 100) + "%"
+            color: Qt.darker(root.bar.foreground, 1.3)
+            font.family: root.bar.fontFamily
+            font.pixelSize: Style.font.caption
+            width: Style.space(34)
+            horizontalAlignment: Text.AlignRight
+          }
+        }
 
-            width: sourceList.width
-            height: sourceInner.implicitHeight + Style.space(10)
-            radius: Style.spacing.labelGap
-            color: selected ? Style.selectedFillFor(root.bar.foreground, Color.accent) : "transparent"
-            borderSpec: selected ? Border.controlSpec("normal", root.bar.foreground, Color.accent) : Border.none()
+        PanelSeparator {
+          visible: root.sourcePlayers.length > 1
+          foreground: root.bar.foreground
+        }
 
-            MouseArea {
-              anchors.fill: parent
-              hoverEnabled: true
-              cursorShape: Qt.PointingHandCursor
-              onClicked: root.selectPlayer(sourceRow.player)
-            }
+        Column {
+          id: sourceList
+          visible: root.sourcePlayers.length > 1
+          width: parent.width
+          spacing: Style.space(4)
 
-            Row {
-              id: sourceInner
-              anchors.left: parent.left
-              anchors.right: parent.right
-              anchors.verticalCenter: parent.verticalCenter
-              anchors.leftMargin: sourceRow.borderLeft + Style.space(4)
-              anchors.rightMargin: sourceRow.borderRight + Style.space(4)
-              spacing: Style.space(6)
+          Repeater {
+            model: root.sourcePlayers
 
-              Button {
-                id: sourcePlayButton
-                anchors.verticalCenter: parent.verticalCenter
-                iconText: sourceRow.player && sourceRow.player.isPlaying ? "󰏤" : "󰐊"
-                foreground: root.bar.foreground
-                horizontalPadding: Style.spacing.controlPaddingY
-                verticalPadding: Style.spacing.controlPaddingY
-                tooltipText: sourceRow.player && sourceRow.player.isPlaying ? "Pause" : "Play"
-                onClicked: if (sourceRow.player) sourceRow.player.togglePlaying()
+            BorderSurface {
+              id: sourceRow
+              required property var modelData
+
+              readonly property var player: modelData
+              readonly property bool selected: root.activePlayer && player
+                && root.playerKey(root.activePlayer) === root.playerKey(player)
+              readonly property string sourceTitle: player ? (player.trackTitle || player.identity || player.desktopEntry || "Media source") : "Media source"
+              readonly property string sourceDetail: player && player.trackArtist ? player.trackArtist : (player && player.identity ? player.identity : "")
+
+              width: sourceList.width
+              height: sourceInner.implicitHeight + Style.space(10)
+              radius: Style.spacing.labelGap
+              color: selected ? Style.selectedFillFor(root.bar.foreground, Color.accent) : "transparent"
+              borderSpec: selected ? Border.controlSpec("normal", root.bar.foreground, Color.accent) : Border.none()
+
+              MouseArea {
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.PointingHandCursor
+                onClicked: root.selectPlayer(sourceRow.player)
               }
 
-              Column {
-                width: parent.width - sourcePlayButton.width - sourceFocusButton.width - parent.spacing * 2
-                spacing: Style.space(1)
+              Row {
+                id: sourceInner
+                anchors.left: parent.left
+                anchors.right: parent.right
                 anchors.verticalCenter: parent.verticalCenter
+                anchors.leftMargin: sourceRow.borderLeft + Style.space(4)
+                anchors.rightMargin: sourceRow.borderRight + Style.space(4)
+                spacing: Style.space(6)
 
-                Text {
-                  textFormat: Text.PlainText
-                  text: sourceRow.sourceTitle
-                  color: root.bar.foreground
-                  font.family: root.bar.fontFamily
-                  font.pixelSize: Style.font.bodySmall
-                  font.bold: sourceRow.selected
-                  elide: Text.ElideRight
-                  width: parent.width
+                Button {
+                  id: sourcePlayButton
+                  anchors.verticalCenter: parent.verticalCenter
+                  iconText: sourceRow.player && sourceRow.player.isPlaying ? "󰏤" : "󰐊"
+                  foreground: root.bar.foreground
+                  horizontalPadding: Style.spacing.controlPaddingY
+                  verticalPadding: Style.spacing.controlPaddingY
+                  tooltipText: sourceRow.player && sourceRow.player.isPlaying ? "Pause" : "Play"
+                  onClicked: if (sourceRow.player) sourceRow.player.togglePlaying()
                 }
 
-                Text {
-                  textFormat: Text.PlainText
-                  text: sourceRow.sourceDetail
-                  color: Qt.darker(root.bar.foreground, 1.5)
-                  font.family: root.bar.fontFamily
-                  font.pixelSize: Style.font.caption
-                  elide: Text.ElideRight
-                  width: parent.width
-                  visible: text !== ""
-                }
-              }
+                Column {
+                  width: parent.width - sourcePlayButton.width - sourceFocusButton.width - parent.spacing * 2
+                  spacing: Style.space(1)
+                  anchors.verticalCenter: parent.verticalCenter
 
-              Button {
-                id: sourceFocusButton
-                anchors.verticalCenter: parent.verticalCenter
-                iconText: "󰁔"
-                foreground: root.bar.foreground
-                horizontalPadding: Style.spacing.controlPaddingY
-                verticalPadding: Style.spacing.controlPaddingY
-                tooltipText: "Go to player"
-                onClicked: root.focusPlayer(sourceRow.player)
+                  Text {
+                    textFormat: Text.PlainText
+                    text: sourceRow.sourceTitle
+                    color: root.bar.foreground
+                    font.family: root.bar.fontFamily
+                    font.pixelSize: Style.font.bodySmall
+                    font.bold: sourceRow.selected
+                    elide: Text.ElideRight
+                    width: parent.width
+                  }
+
+                  Text {
+                    textFormat: Text.PlainText
+                    text: sourceRow.sourceDetail
+                    color: Qt.darker(root.bar.foreground, 1.5)
+                    font.family: root.bar.fontFamily
+                    font.pixelSize: Style.font.caption
+                    elide: Text.ElideRight
+                    width: parent.width
+                    visible: text !== ""
+                  }
+                }
+
+                Button {
+                  id: sourceFocusButton
+                  anchors.verticalCenter: parent.verticalCenter
+                  iconText: "󰁔"
+                  foreground: root.bar.foreground
+                  horizontalPadding: Style.spacing.controlPaddingY
+                  verticalPadding: Style.spacing.controlPaddingY
+                  tooltipText: "Go to player"
+                  onClicked: root.focusPlayer(sourceRow.player)
+                }
               }
             }
           }
         }
       }
+    }
+  }
+
+  function parseReply(text) {
+    var lines = String(text || "").trim().split("\n")
+    try {
+      return JSON.parse(lines[lines.length - 1])
+    } catch (error) {
+      return { ok: false, error: "no reply from cliamp" }
     }
   }
 
