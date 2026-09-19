@@ -124,10 +124,22 @@ Column {
     request(["sptargets"])
   }
 
-  function activate(item) {
+  function activate(item, rowIndex) {
     var ctl = page.widget.cliamp
     if (!ctl || ctl.busy || loading) return
     var key = item.provider + "|" + item.id
+    if (browsing && folderRemote) {
+      // Loading the list keeps titles and artists; start at the picked row.
+      var at = folderRemote.indexOf("|")
+      pendingKey = key
+      ctl.run(["playfrom", folderRemote.slice(0, at), folderRemote.slice(at + 1), String(offset + rowIndex)], function(r) {
+        page.pendingKey = ""
+        if (!r.ok) return
+        ctl.flash("Playing " + item.name + "…")
+        page.widget.view = "main"
+      }, page)
+      return
+    }
     if (browsing && folderName) {
       pendingKey = key
       ctl.run(["play", item.id], function(r) {
@@ -394,6 +406,7 @@ Column {
       BorderSurface {
         id: row
         required property var modelData
+        required property int index
         readonly property bool pending: page.pendingKey === modelData.provider + "|" + modelData.id
         readonly property bool locked: !page.browsing && modelData.has === true && modelData.provider !== "local"
 
@@ -408,7 +421,7 @@ Column {
           anchors.fill: parent
           hoverEnabled: true
           cursorShape: row.locked ? Qt.ArrowCursor : Qt.PointingHandCursor
-          onClicked: page.activate(row.modelData)
+          onClicked: page.activate(row.modelData, row.index)
         }
 
         Text {

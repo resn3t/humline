@@ -397,6 +397,24 @@ def main(argv):
         res = call("provider.tracks", {"provider": prov, "playlist": list_id, "offset": off, "limit": n}, timeout=90)
         items = [{"id": t.get("path"), "name": track_label(t)} for t in res.get("tracks") or [] if t.get("path")]
         return {"ok": True, "total": int(res.get("total") or 0), "items": items}
+    if cmd == "playfrom":
+        # Load the whole list (the tracks then carry their titles and artists)
+        # and start at the picked row, so playback continues through the list.
+        prov, list_id, index = args[0], args[1], int(args[2])
+        before = snapshot().get("playlist_revision")
+        submit("provider.load", {"provider": prov, "playlist": list_id})
+        # The finished job carries every track (too big to read back), so
+        # watch the live playlist instead.
+        deadline = time.time() + 45
+        while True:
+            snap = snapshot()
+            if snap.get("playlist_revision") != before and int(snap.get("total") or 0) > index:
+                break
+            if time.time() > deadline:
+                raise Fail("cliamp could not load that list")
+            time.sleep(0.25)
+        call("queue.play", {"index": index}, writes=True)
+        return {"ok": True}
     if cmd == "play":
         # Replace the live playlist with just this track.
         if not args[0] or args[0].startswith("-"):

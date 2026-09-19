@@ -48,7 +48,8 @@ a source browser.
     folder: pick a station to play it, Esc goes back.
     Libraries, history and long lists (**Spotify → Your Music**, **Local →
     Recently Played**, anything over 100 tracks) open the same way as a paged
-    track list: pick a track to play just that one, Esc goes back. Shorter
+    track list: pick a track to start there and play on through the list, Esc
+    goes back. Shorter
     playlists still load whole.
 
 ## Compatibility
