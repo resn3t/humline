@@ -47,10 +47,19 @@ BarWidget {
     return m ? m[1] : ""
   }
   property var fetchedArt: ({})
-  readonly property string artUrl: activePlayer && activePlayer.trackArtUrl ? activePlayer.trackArtUrl
-    : (spotifyTrackId && fetchedArt[spotifyTrackId] ? fetchedArt[spotifyTrackId] : "")
+  // cliamp streams have no cover, and cliamp keeps reporting the previous
+  // file's cover file for them; show cliamp's own logo instead of that.
+  readonly property bool cliampLogo: isCliamp && (!activePlayer.trackArtUrl
+    || (trackUrl.indexOf("file://") !== 0 && String(activePlayer.trackArtUrl).indexOf("file://") === 0))
+  readonly property string artUrl: cliampLogo ? Qt.resolvedUrl("assets/cliamp-logo.png")
+    : (activePlayer && activePlayer.trackArtUrl ? activePlayer.trackArtUrl
+      : (spotifyTrackId && fetchedArt[spotifyTrackId] ? fetchedArt[spotifyTrackId] : ""))
 
-  readonly property bool hasLength: !!activePlayer && activePlayer.lengthSupported && activePlayer.length > 0
+  // A cliamp stream (not a file) that shows the logo also reports a stale
+  // album and length from the previous file.
+  readonly property bool cliampStream: cliampLogo && trackUrl.indexOf("file://") !== 0
+
+  readonly property bool hasLength: !cliampStream && !!activePlayer && activePlayer.lengthSupported && activePlayer.length > 0
   readonly property bool canSeek: hasLength && activePlayer.canSeek && activePlayer.positionSupported
 
   property bool popupOpen: false
@@ -418,7 +427,7 @@ BarWidget {
 
             Text {
               textFormat: Text.PlainText
-              text: root.activePlayer && root.activePlayer.trackAlbum ? root.activePlayer.trackAlbum : ""
+              text: root.activePlayer && !root.cliampStream && root.activePlayer.trackAlbum ? root.activePlayer.trackAlbum : ""
               color: Color.muted
               font.family: root.bar.fontFamily
               font.pixelSize: Style.font.caption

@@ -187,6 +187,10 @@ Other facts:
 
 ## Legal
 
+The cliamp logo in `assets/` is cliamp's official icon (MIT, © Bjarne Øverli,
+from [bjarneo/cliamp](https://github.com/bjarneo/cliamp)); Humline shows it as
+the cover when cliamp reports none. It implies no endorsement by cliamp.
+
 Free to use, modify and share under the [MIT License](LICENSE). The card
 layout is adapted from Omarchy's built-in media widget (MIT, © David
 Heinemeier Hansson). All product names and trademarks (Omarchy, cliamp,
