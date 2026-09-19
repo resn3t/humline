@@ -51,13 +51,13 @@ BarWidget {
   // file's cover file for them; show cliamp's own logo instead of that.
   readonly property bool cliampLogo: isCliamp && (!activePlayer.trackArtUrl
     || (trackUrl.indexOf("file://") !== 0 && String(activePlayer.trackArtUrl).indexOf("file://") === 0))
-  readonly property string artUrl: cliampLogo ? Qt.resolvedUrl("assets/cliamp-logo.png")
-    : (activePlayer && activePlayer.trackArtUrl ? activePlayer.trackArtUrl
-      : (spotifyTrackId && fetchedArt[spotifyTrackId] ? fetchedArt[spotifyTrackId] : ""))
+  readonly property string spotifyArt: spotifyTrackId && fetchedArt[spotifyTrackId] ? fetchedArt[spotifyTrackId] : ""
+  readonly property string artUrl: cliampLogo ? (spotifyArt || Qt.resolvedUrl("assets/cliamp-logo.png"))
+    : (activePlayer && activePlayer.trackArtUrl ? activePlayer.trackArtUrl : spotifyArt)
 
-  // A cliamp stream (not a file) that shows the logo also reports a stale
-  // album and length from the previous file.
-  readonly property bool cliampStream: cliampLogo && trackUrl.indexOf("file://") !== 0
+  // A cliamp radio stream (http url) that shows the logo also reports a stale
+  // album and length from the previous file. Spotify and files keep theirs.
+  readonly property bool cliampStream: cliampLogo && /^https?:\/\//.test(trackUrl)
 
   readonly property bool hasLength: !cliampStream && !!activePlayer && activePlayer.lengthSupported && activePlayer.length > 0
   readonly property bool canSeek: hasLength && activePlayer.canSeek && activePlayer.positionSupported
@@ -110,11 +110,12 @@ BarWidget {
   // Some players publish a Spotify track URI but no cover; ask Spotify's
   // public oEmbed endpoint for the track thumbnail instead.
   onSpotifyTrackIdChanged: fetchSpotifyArt()
+  onCliampLogoChanged: fetchSpotifyArt()
   Component.onCompleted: fetchSpotifyArt()
 
   function fetchSpotifyArt() {
     var id = spotifyTrackId
-    if (!id || fetchedArt[id] || (activePlayer && activePlayer.trackArtUrl)) return
+    if (!id || fetchedArt[id] || (activePlayer && activePlayer.trackArtUrl && !cliampLogo)) return
     var xhr = new XMLHttpRequest()
     xhr.onreadystatechange = function() {
       if (xhr.readyState !== XMLHttpRequest.DONE || xhr.status !== 200) return

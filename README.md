@@ -46,8 +46,10 @@ a source browser.
     Spotify…); pick a playlist or station to play it.
     Radio entries that are lists of stations (like "cliamp radio") open as a
     folder: pick a station to play it, Esc goes back.
-    **Local → Recently Played** opens the same way: pick one of your last
-    tracks to play just that one (Esc goes back).
+    Libraries, history and long lists (**Spotify → Your Music**, **Local →
+    Recently Played**, anything over 100 tracks) open the same way as a paged
+    track list: pick a track to play just that one, Esc goes back. Shorter
+    playlists still load whole.
 
 ## Compatibility
 

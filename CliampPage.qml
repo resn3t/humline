@@ -32,12 +32,15 @@ Column {
   property string folderName: ""
   property var folderItems: []
   property int folderBackOffset: 0
+  // "provider|list" when the folder is a server-paged track list.
+  property string folderRemote: ""
   // A cold Spotify catalogue stalls cliamp for seconds: only on request.
   property bool spotifyAsked: false
   readonly property bool spotifyWaiting: browsing && page.widget.browseProvider === "spotify" && !spotifyAsked
 
-  readonly property var shown: browsing && !folderName ? items : (browsing ? folderItems : items).slice(offset, offset + pageSize)
-  readonly property int count: browsing ? (folderName ? folderItems.length : total) : items.length
+  readonly property bool staticFolder: folderName !== "" && folderRemote === ""
+  readonly property var shown: browsing && !staticFolder ? items : (browsing ? folderItems : items).slice(offset, offset + pageSize)
+  readonly property int count: browsing ? (staticFolder ? folderItems.length : total) : items.length
   readonly property bool spotifyTrack: trackPath.indexOf("spotify:") === 0
   readonly property string itemFont: page.widget.bar.fontFamily
 
@@ -68,7 +71,12 @@ Column {
 
   function fetch() {
     if (browsing) {
-      if (!page.widget.browseProvider) request(["providers"])
+      if (folderRemote) {
+        var at = folderRemote.indexOf("|")
+        request(["tracks", folderRemote.slice(0, at), folderRemote.slice(at + 1), String(offset), String(pageSize)])
+      } else if (staticFolder) {
+        loading = false
+      } else if (!page.widget.browseProvider) request(["providers"])
       else if (spotifyWaiting) {
         items = []
         loading = false
@@ -130,12 +138,8 @@ Column {
       }, page)
       return
     }
-    if (browsing && page.widget.browseProvider === "local" && item.id === "Recently Played") {
-      pendingKey = key
-      ctl.run(["tracks", "local", item.id], function(r) {
-        page.pendingKey = ""
-        if (r.ok) page.enterFolder(item.name, r.items)
-      }, page)
+    if (browsing && page.isBigList(item)) {
+      page.enterRemoteFolder(item)
       return
     }
     if (browsing && page.widget.browseProvider === "radio" && String(item.id).indexOf("l:") === 0) {
@@ -155,6 +159,22 @@ Column {
     activateTarget(item, key)
   }
 
+  // Libraries, history and long lists are browsed track by track; loading
+  // them whole would queue thousands of tracks (or a history of streams).
+  function isBigList(item) {
+    return item.section === "Library" || item.count > 100 || item.id === "Recently Played"
+  }
+
+  function enterRemoteFolder(item) {
+    folderBackOffset = offset
+    folderName = item.name
+    folderRemote = page.widget.browseProvider + "|" + item.id
+    items = []
+    total = 0
+    offset = 0
+    fetch()
+  }
+
   function enterFolder(name, entries) {
     folderBackOffset = offset
     folderName = name
@@ -167,8 +187,11 @@ Column {
   function leaveFolder() {
     if (!folderName) return false
     folderName = ""
+    folderRemote = ""
     folderItems = []
     offset = folderBackOffset
+    items = []
+    fetch()
     return true
   }
 
@@ -224,6 +247,7 @@ Column {
 
   onBrowsingChanged: {
     folderName = ""
+    folderRemote = ""
     folderItems = []
     items = []
     total = 0
@@ -252,6 +276,7 @@ Column {
     function onBrowseProviderChanged() {
       if (!page.browsing) return
       page.folderName = ""
+      page.folderRemote = ""
       page.folderItems = []
       page.total = 0
       page.showPage(0)

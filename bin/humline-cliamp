@@ -391,20 +391,18 @@ def main(argv):
                 return {"ok": True, "folder": True, "items": items}
         return {"ok": True, "folder": False}
     if cmd == "tracks":
-        # The tracks of a history-like list, newest first, so one can be picked.
-        res = call("provider.tracks", {"provider": args[0], "playlist": args[1], "offset": 0, "limit": 100})
-        seen, items = set(), []
-        for t in res.get("tracks") or []:
-            path = t.get("path") or ""
-            if not path or path in seen or is_list_url(path):
-                continue
-            seen.add(path)
-            items.append({"id": path, "name": track_label(t)})
-        return {"ok": True, "items": items}
+        # One page of a list's tracks, so a big list (library, history) can be
+        # browsed and a single track picked.
+        prov, list_id, off, n = args[0], args[1], int(args[2]), int(args[3])
+        res = call("provider.tracks", {"provider": prov, "playlist": list_id, "offset": off, "limit": n}, timeout=90)
+        items = [{"id": t.get("path"), "name": track_label(t)} for t in res.get("tracks") or [] if t.get("path")]
+        return {"ok": True, "total": int(res.get("total") or 0), "items": items}
     if cmd == "play":
         # Replace the live playlist with just this track.
         if not args[0] or args[0].startswith("-"):
             raise Fail("nothing to play")
+        if is_list_url(args[0]):
+            raise Fail("that is a station list; open it under Radio")
         call("queue.clear", writes=True)
         call("queue", {"path": args[0]}, writes=True)
         call("queue.play", {"index": 0}, writes=True)
