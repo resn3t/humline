@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "humline",
   "name": "Humline Player",
-  "version": "1.3.2",
+  "version": "1.3.3",
   "author": "resn3t",
   "description": "Humline Player: a tiny now-playing bar widget for any MPRIS player, with a live cava dot spectrum and a themed card; extra hearts, playlists and a source browser for cliamp",
   "kinds": [

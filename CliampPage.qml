@@ -122,11 +122,19 @@ Column {
     var key = item.provider + "|" + item.id
     if (browsing && folderName) {
       pendingKey = key
-      ctl.run(["playurl", item.id], function(r) {
+      ctl.run(["play", item.id], function(r) {
         page.pendingKey = ""
         if (!r.ok) return
         ctl.flash("Playing " + item.name + "…")
         page.widget.view = "main"
+      }, page)
+      return
+    }
+    if (browsing && page.widget.browseProvider === "local" && item.id === "Recently Played") {
+      pendingKey = key
+      ctl.run(["tracks", "local", item.id], function(r) {
+        page.pendingKey = ""
+        if (r.ok) page.enterFolder(item.name, r.items)
       }, page)
       return
     }

@@ -70,6 +70,13 @@ class StationListTests(unittest.TestCase):
         self.assertFalse(helper.is_list_url("/local/file.m3u"))
 
 
+class LabelTests(unittest.TestCase):
+    def test_stream_and_track_labels(self):
+        self.assertEqual(helper.track_label({"title": "radio.x.test", "path": "https://radio.x.test/lofi/stream"}), "radio.x.test/lofi/stream")
+        self.assertEqual(helper.track_label({"title": "Song", "artist": "Band", "path": "/m/a.mp3"}), "Song \u2014 Band")
+        self.assertEqual(helper.track_label({"path": "/m/a.mp3"}), "/m/a.mp3")
+
+
 class ToggleTests(unittest.TestCase):
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()

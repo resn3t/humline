@@ -313,6 +313,15 @@ def parse_station_list(text):
     return entries[:200]
 
 
+def track_label(t):
+    """Readable name for a track; streams often carry only their host as title."""
+    path, title, artist = t.get("path") or "", t.get("title") or "", t.get("artist") or ""
+    if path.lower().startswith(("http://", "https://")) and (not title or title in path):
+        tail = path.split("//", 1)[1].split("?", 1)[0].rstrip("/")
+        return tail
+    return "%s \u2014 %s" % (title, artist) if title and artist else (title or path)
+
+
 def fetch_list(url):
     req = urllib.request.Request(url, headers={"User-Agent": "humline"})
     try:
@@ -381,9 +390,21 @@ def main(argv):
             if items:
                 return {"ok": True, "folder": True, "items": items}
         return {"ok": True, "folder": False}
-    if cmd == "playurl":
-        if not str(args[0]).lower().startswith(("http://", "https://")):
-            raise Fail("not a stream address")
+    if cmd == "tracks":
+        # The tracks of a history-like list, newest first, so one can be picked.
+        res = call("provider.tracks", {"provider": args[0], "playlist": args[1], "offset": 0, "limit": 100})
+        seen, items = set(), []
+        for t in res.get("tracks") or []:
+            path = t.get("path") or ""
+            if not path or path in seen or is_list_url(path):
+                continue
+            seen.add(path)
+            items.append({"id": path, "name": track_label(t)})
+        return {"ok": True, "items": items}
+    if cmd == "play":
+        # Replace the live playlist with just this track.
+        if not args[0] or args[0].startswith("-"):
+            raise Fail("nothing to play")
         call("queue.clear", writes=True)
         call("queue", {"path": args[0]}, writes=True)
         call("queue.play", {"index": 0}, writes=True)

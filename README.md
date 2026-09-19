@@ -45,6 +45,8 @@ The bar face is just this: ![the bar widget](docs/bar.png)
     Spotify…); pick a playlist or station to play it.
     Radio entries that are lists of stations (like "cliamp radio") open as a
     folder: pick a station to play it, Esc goes back.
+    **Local → Recently Played** opens the same way: pick one of your last
+    tracks to play just that one (Esc goes back).
 
 ## Compatibility
 
