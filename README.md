@@ -8,8 +8,6 @@ a source browser.
 
 ![Humline Player: the card, and the cliamp source browser](preview.png)
 
-The bar face is just this: ![the bar widget](docs/bar.png)
-
 > **Unofficial, personal project.** I built Humline mainly for my own setup
 > (Omarchy + cliamp) and share it as-is. It is not made, endorsed or
 > supported by Omarchy, Basecamp, cliamp or any music service.
@@ -36,6 +34,9 @@ The bar face is just this: ![the bar widget](docs/bar.png)
   previous/play/next, shuffle/repeat (if the player supports them), volume.
 - **Several players at once:** each gets its own row with play/pause and
   jump; click a row to make it the main one (it stays main while it plays; when it stops, whichever player is playing takes over).
+
+  ![Humline Player card with Spotify (via cliamp) playing and a YouTube tab in Chromium listed as a second player](docs/multi-player.png)
+
 - **cliamp extras** (only while cliamp is the active player):
   - **Heart:** like/unlike the track in cliamp's Favorites (same as `n` in
     cliamp).
